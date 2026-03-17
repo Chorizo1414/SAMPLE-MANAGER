@@ -7,6 +7,7 @@
 #include "AudioPlayer.h"
 #include "SoundTouch/BPMDetect.h"
 #include "BTrack/BTrack.h"
+#include "KeyDetector.h"
 
 //==============================================================================
 class MainComponent  : public juce::AudioAppComponent, 
@@ -70,6 +71,7 @@ private:
     juce::StringArray filteredKeys; // <-- Para guardar la tonalidad
 
     juce::StringPairArray bpmDatabase; // Un diccionario que guarda "Ruta del Archivo" = "BPM"
+    juce::StringPairArray keyDatabase;
     juce::File databaseFile;           // El archivo físico en tu disco duro
 
     void loadDatabase();

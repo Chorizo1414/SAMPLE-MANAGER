@@ -4,6 +4,7 @@
               addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1">
   <MAINGROUP id="BE0imx" name="SAMPLE MANAGER">
     <GROUP id="{2CF1F25B-C0DE-A5C3-89DB-D70D5EBC66FA}" name="Source">
+      <FILE id="qrwLJD" name="KeyDetector.h" compile="0" resource="0" file="Source/KeyDetector.h"/>
       <GROUP id="{23295F90-B3A7-5BB6-52AC-072CD835C63C}" name="BTrack">
         <FILE id="s1reue" name="_kiss_fft_guts.h" compile="0" resource="0"
               file="Source/BTrack/_kiss_fft_guts.h"/>

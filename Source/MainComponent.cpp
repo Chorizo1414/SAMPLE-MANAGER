@@ -83,7 +83,8 @@ MainComponent::MainComponent()
     fileList.setColour(juce::ListBox::backgroundColourId, juce::Colour(0xff2b2b2b));
 
     setAudioChannels(0, 2);
-    setSize(1100, 750);
+    // {* CORRECCIÓN: Pantalla más ancha (1300) y menos alta (650) *}
+    setSize(1300, 650);
 }
 
 MainComponent::~MainComponent()
@@ -285,20 +286,27 @@ void MainComponent::applyFilters()
         {
             filteredAudioFiles.add(file);
 
-            // {* NUEVO CÓDIGO: El programa revisa la caché al instante *}
+            // El programa revisa la caché al instante
             juce::String filePath = file.getFullPathName();
             if (bpmDatabase.containsKey(filePath))
             {
-                // Si ya lo escaneaste ayer, pon el número de inmediato
+                // Si está en caché, cargamos todo de la memoria
                 filteredBPMs.add(bpmDatabase[filePath]);
+
+                juce::String savedKey = keyDatabase[filePath];
+                if (savedKey.isEmpty() || savedKey == "--")
+                    savedKey = extractKeyFromName(fileName); // Fallback de seguridad
+
+                filteredKeys.add(savedKey);
             }
             else
             {
-                // Si es un archivo virgen, busca en el nombre o pon "--"
+                // Si es virgen, intentamos extraer del nombre visualmente
                 filteredBPMs.add(extractBPMFromName(fileName));
+                filteredKeys.add(extractKeyFromName(fileName));
             }
 
-            filteredKeys.add(extractKeyFromName(fileName));
+            // (¡Aquí había una línea extra que duplicaba los datos y rompía la lista! Ya la eliminamos)
         }
     }
 
@@ -345,14 +353,20 @@ void MainComponent::analyzeBPM(const juce::File& file)
 {
     juce::String filePath = file.getFullPathName();
 
+    // --- EL BLOQUE CORREGIDO ---
     if (bpmDatabase.containsKey(filePath))
     {
         juce::String savedBPM = bpmDatabase[filePath];
-        bpmDisplayLabel.setText("BPM: " + savedBPM, juce::dontSendNotification);
+        juce::String savedKey = keyDatabase[filePath];
+        if (savedKey.isEmpty()) savedKey = "--";
+
+        // Ahora sí imprime ambos datos al cargar de la memoria
+        bpmDisplayLabel.setText("BPM: " + savedBPM + " | Key: " + savedKey, juce::dontSendNotification);
 
         int index = filteredAudioFiles.indexOf(file);
         if (index >= 0) {
             filteredBPMs.set(index, savedBPM);
+            filteredKeys.set(index, savedKey); // Faltaba actualizar la tabla visual aquí
             fileList.repaintRow(index);
         }
         return;
@@ -365,6 +379,7 @@ void MainComponent::analyzeBPM(const juce::File& file)
     {
         // Inicializamos la nueva inteligencia artificial de BTrack
         BTrack bpmDetector;
+        KeyDetector keyDetector(reader->sampleRate);
 
         int maxSeconds = 60;
         juce::int64 numSamplesToRead = juce::jmin(reader->lengthInSamples, (juce::int64)(reader->sampleRate * maxSeconds));
@@ -402,11 +417,13 @@ void MainComponent::analyzeBPM(const juce::File& file)
 
             // Alimentamos a la bestia cuadro por cuadro
             bpmDetector.processAudioFrame(monoFrame.getData());
+            keyDetector.processAudioFrame(monoFrame.getData(), samplesToGet);
             samplesRead += samplesToGet;
         }
 
         // Le pedimos el cálculo final a BTrack
         double detectedBPM = bpmDetector.getCurrentTempoEstimate();
+        juce::String detectedKey = keyDetector.getDetectedKey();
         delete reader;
 
         if (detectedBPM > 0.0)
@@ -414,17 +431,19 @@ void MainComponent::analyzeBPM(const juce::File& file)
             int finalBPM = std::round(detectedBPM);
             juce::String bpmString = juce::String(finalBPM);
 
-            bpmDisplayLabel.setText("BPM: " + bpmString, juce::dontSendNotification);
+            bpmDisplayLabel.setText("BPM: " + bpmString + " | Key: " + detectedKey, juce::dontSendNotification);
 
             int index = filteredAudioFiles.indexOf(file);
             if (index >= 0)
             {
                 filteredBPMs.set(index, bpmString);
+                filteredKeys.set(index, detectedKey); // <--- NUEVO: Actualiza la tabla visual
                 fileList.repaintRow(index);
             }
 
             bpmDatabase.set(filePath, bpmString);
-            saveDatabase();
+            keyDatabase.set(filePath, detectedKey); // <--- NUEVO: Guarda en RAM
+            saveDatabase();                         // <--- NUEVO: Guarda en XML
         }
         else
         {
@@ -446,7 +465,10 @@ void MainComponent::loadDatabase()
         {
             juce::String path = child->getStringAttribute("path");
             juce::String bpm = child->getStringAttribute("bpm");
+            juce::String key = child->getStringAttribute("key", "--"); // <-- Lee la Key
+
             bpmDatabase.set(path, bpm);
+            keyDatabase.set(path, key); // <-- La guarda en memoria RAM
         }
     }
 }
@@ -455,12 +477,12 @@ void MainComponent::saveDatabase()
 {
     juce::XmlElement xml("BPM_CACHE");
 
-    // Guardamos cada archivo y su BPM en el XML
-    for (auto key : bpmDatabase.getAllKeys())
+    for (auto path : bpmDatabase.getAllKeys())
     {
         auto* child = xml.createNewChildElement("FILE");
-        child->setAttribute("path", key);
-        child->setAttribute("bpm", bpmDatabase[key]);
+        child->setAttribute("path", path);
+        child->setAttribute("bpm", bpmDatabase[path]);
+        child->setAttribute("key", keyDatabase[path]); // <-- Escribe la Key en el disco duro
     }
 
     xml.writeTo(databaseFile);
