@@ -1,0 +1,4 @@
+2. Sistema de Favoritos (Corazón / Estrella)
+Agregar una pequeña estrellita al lado de cada nombre en la lista. Si te gusta un snare, le das a la estrella. Luego, en tu árbol de carpetas a la izquierda, agregamos una "Carpeta Virtual" hasta arriba que se llame "❤️ Favoritos". Al darle clic, te muestra solo los audios que has marcado, sin importar en qué parte del disco duro estén.
+
+Por qué lo vale: Las librerías de 100GB tienen mucha "basura". Poder separar tus sonidos top es vital para producir rápido.

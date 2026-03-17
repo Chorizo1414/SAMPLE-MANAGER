@@ -1,0 +1,17 @@
+# Ignorar carpetas pesadas autogeneradas por JUCE y Visual Studio
+Builds/
+JuceLibraryCode/
+.vs/
+x64/
+Debug/
+Release/
+
+# Ignorar archivos compilados y temporales
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.lib
+*.dll
+*.suo
+*.user
