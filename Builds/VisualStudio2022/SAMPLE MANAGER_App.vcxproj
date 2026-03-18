@@ -2911,6 +2911,7 @@
     <ClCompile Include="..\..\JuceLibraryCode\include_juce_gui_extra.cpp"/>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\Source\CustomTheme.h"/>
     <ClInclude Include="..\..\Source\KeyDetector.h"/>
     <ClInclude Include="..\..\Source\BTrack\_kiss_fft_guts.h"/>
     <ClInclude Include="..\..\Source\BTrack\BTrack.h"/>

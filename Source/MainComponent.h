@@ -8,6 +8,7 @@
 #include "SoundTouch/BPMDetect.h"
 #include "BTrack/BTrack.h"
 #include "KeyDetector.h"
+#include "CustomTheme.h"
 
 //==============================================================================
 class MainComponent  : public juce::AudioAppComponent, 
@@ -85,6 +86,8 @@ private:
     // 2. Los paneles visuales que se conectan al motor
     WaveformDisplay waveformDisplay{ audioPlayer.getFormatManager(), audioPlayer.getTransportSource() };
     TransportControls transportControls{ audioPlayer.getTransportSource() };
+
+    CustomTheme myCustomTheme;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

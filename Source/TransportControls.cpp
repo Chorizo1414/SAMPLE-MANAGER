@@ -31,6 +31,9 @@ TransportControls::TransportControls(juce::AudioTransportSource& transportToUse)
     volumeLabel.setText("Vol:", juce::dontSendNotification);
     volumeLabel.attachToComponent(&volumeSlider, true);
 
+    // Volumen regresa al 100% (asumiendo que tu máximo es 1.0)
+    volumeSlider.setDoubleClickReturnValue(true, 1.0);
+
     // Configuración del Pitch Slider
     pitchSlider.setSliderStyle(juce::Slider::LinearHorizontal);
     pitchSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 40, 20);
@@ -39,6 +42,9 @@ TransportControls::TransportControls(juce::AudioTransportSource& transportToUse)
 
     pitchLabel.setText("Pitch:", juce::dontSendNotification);
     pitchLabel.attachToComponent(&pitchSlider, true);
+
+    // Pitch regresa a 0 semitonos
+    pitchSlider.setDoubleClickReturnValue(true, 0.0);
 
 	//tempo slider
     // --- Configuración del Tempo en Porcentaje (%) ---
@@ -64,6 +70,9 @@ TransportControls::TransportControls(juce::AudioTransportSource& transportToUse)
                 onTempoChanged(multiplier);
             }
         };
+
+    // Speed regresa a su valor base (Si tu cero es 0%, usa 0.0. Si tu normal es 1.0x, usa 1.0)
+    tempoSlider.setDoubleClickReturnValue(true, 0.0);
 
     // --- ACCIONES DE LOS BOTONES ---
     playButton.onClick = [this] { transportSource.start(); };
@@ -121,18 +130,24 @@ void TransportControls::resized()
     stretchButton.setBounds(area.removeFromLeft(75).reduced(2));
     randomButton.setBounds(area.removeFromLeft(80).reduced(2));
 
-    // Margen GIGANTE de 40 píxeles para que quepa la etiqueta "Vol:" sin chocar
+    // --- ZONA DE SLIDERS (Tamaños Independientes) ---
+
+    // 1. Asignamos un ancho diferente a cada uno
+    int volWidth = 90;    // El tamaño que quedó perfecto
+    int pitchWidth = 150; // Más ancho para compensar su caja de números
+    int speedWidth = 150; // Más ancho para compensar su caja de números
+
+    // 2. Slider de Volumen
     area.removeFromLeft(40);
+    volumeSlider.setBounds(area.removeFromLeft(volWidth).reduced(2));
 
-    // Dividimos el espacio sobrante entre los 3 sliders
-    int sliderWidth = area.getWidth() / 3;
-    volumeSlider.setBounds(area.removeFromLeft(sliderWidth).reduced(2));
+    // 3. Slider de Pitch
+    area.removeFromLeft(50);
+    pitchSlider.setBounds(area.removeFromLeft(pitchWidth).reduced(2));
 
-    area.removeFromLeft(20); // Margen para la etiqueta "Pitch:"
-    pitchSlider.setBounds(area.removeFromLeft(sliderWidth).reduced(2));
-
-    area.removeFromLeft(20); // Margen para la etiqueta "Speed:"
-    tempoSlider.setBounds(area.reduced(2));
+    // 4. Slider de Speed
+    area.removeFromLeft(60);
+    tempoSlider.setBounds(area.removeFromLeft(speedWidth).reduced(2));
 }
 
 bool TransportControls::isLoopEnabled() const

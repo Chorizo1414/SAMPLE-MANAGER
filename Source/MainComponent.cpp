@@ -3,8 +3,22 @@
 //==============================================================================
 MainComponent::MainComponent()
 {
+    juce::LookAndFeel::setDefaultLookAndFeel(&myCustomTheme);
+
     addAndMakeVisible(directoryTree);
     addAndMakeVisible(fileList);
+
+    // {* FASE 1: PALETA DE COLORES PREMIUM (Estilo Splice/Arcade) *}
+    // Colores globales de la ventana y cajas de texto
+    getLookAndFeel().setColour(juce::ResizableWindow::backgroundColourId, juce::Colour(0xff181a1f));
+    getLookAndFeel().setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff121418));
+    getLookAndFeel().setColour(juce::TextEditor::textColourId, juce::Colour(0xffabb2bf));
+    getLookAndFeel().setColour(juce::TextEditor::outlineColourId, juce::Colour(0xff2c313a));
+    getLookAndFeel().setColour(juce::TextEditor::focusedOutlineColourId, juce::Colour(0xff4faccc)); // Cyan al hacer clic
+
+    // Colores del árbol de carpetas lateral (más claro para dar profundidad)
+    directoryTree.setColour(juce::TreeView::backgroundColourId, juce::Colour(0xff1c1f26));
+    directoryTree.setColour(juce::TreeView::linesColourId, juce::Colours::transparentBlack);
 
     directoryTree.addListener(this);
     databaseFile = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
@@ -22,20 +36,21 @@ MainComponent::MainComponent()
     bpmBox.addListener(this);
 
     addAndMakeVisible(bpmDisplayLabel);
-    bpmDisplayLabel.setColour(juce::Label::textColourId, juce::Colours::lawngreen); // Color verde pro
-    bpmDisplayLabel.setFont(juce::Font(16.0f, juce::Font::bold));
-    bpmDisplayLabel.setText("BPM: --", juce::dontSendNotification);
+    bpmDisplayLabel.setColour(juce::Label::textColourId, juce::Colour(0xff56b6c2));
+    bpmDisplayLabel.setFont(juce::Font(14.0f, juce::Font::bold)); // Un poco más pequeña y sutil
+    bpmDisplayLabel.setJustificationType(juce::Justification::centred); // Centrada en su nueva "píldora"
+    bpmDisplayLabel.setText("Selecciona un audio...", juce::dontSendNotification);
 
     // {* NUEVO CÓDIGO: Configuramos los colores de los títulos *}
     addAndMakeVisible(headerName);
-    headerName.setColour(juce::Label::textColourId, juce::Colours::grey);
+    headerName.setColour(juce::Label::textColourId, juce::Colour(0xff6b7280)); // Gris premium
 
     addAndMakeVisible(headerKey);
-    headerKey.setColour(juce::Label::textColourId, juce::Colours::grey);
+    headerKey.setColour(juce::Label::textColourId, juce::Colour(0xff6b7280));
     headerKey.setJustificationType(juce::Justification::centred);
 
     addAndMakeVisible(headerBPM);
-    headerBPM.setColour(juce::Label::textColourId, juce::Colours::grey);
+    headerBPM.setColour(juce::Label::textColourId, juce::Colour(0xff6b7280));
     headerBPM.setJustificationType(juce::Justification::centred);
 
     addAndMakeVisible(keyBox);
@@ -83,12 +98,13 @@ MainComponent::MainComponent()
     fileList.setColour(juce::ListBox::backgroundColourId, juce::Colour(0xff2b2b2b));
 
     setAudioChannels(0, 2);
-    // {* CORRECCIÓN: Pantalla más ancha (1300) y menos alta (650) *}
-    setSize(1300, 650);
+    setSize(1180, 650);
 }
 
 MainComponent::~MainComponent()
 {
+    juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
+
     shutdownAudio();
     directoryThread.stopThread(1000);
 }
@@ -108,30 +124,48 @@ void MainComponent::releaseResources()
     audioPlayer.releaseResources();                                 
 }
 
-void MainComponent::paint (juce::Graphics& g)
+void MainComponent::paint(juce::Graphics& g)
 {
-    g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
+    // 1. Fondo principal de la lista de samples (Oscuro profundo minimalista)
+    g.fillAll(juce::Colour(0xff121419));
+
+    // 2. Fondo del Header superior (Mismo color que las carpetas para unificarlos)
+    g.setColour(juce::Colour(0xff1c1f26));
+    g.fillRect(300, 0, getWidth() - 300, 80); // 80 píxeles de altura
+
+    // 3. Dibujamos una "Píldora" moderna para el BPM y Key arriba a la derecha
+    int badgeWidth = 240;
+    int badgeHeight = 26;
+    int badgeX = getWidth() - badgeWidth - 15;
+    int badgeY = 15;
+
+    g.setColour(juce::Colour(0xff121419)); // Fondo interior de la píldora
+    g.fillRoundedRectangle(badgeX, badgeY, badgeWidth, badgeHeight, badgeHeight / 2.0f);
+    g.setColour(juce::Colour(0xff2c313a)); // Borde sutil
+    g.drawRoundedRectangle(badgeX, badgeY, badgeWidth, badgeHeight, badgeHeight / 2.0f, 1.0f);
 }
 
 void MainComponent::resized()
 {
     directoryTree.setBounds(0, 0, 300, getHeight());
 
-    auto topBar = juce::Rectangle<int>(300, 0, getWidth() - 300, 30);
-    searchBar.setBounds(topBar.removeFromLeft(300).reduced(2));
-    bpmBox.setBounds(topBar.removeFromLeft(70).reduced(2));
-    keyBox.setBounds(topBar.reduced(2));
+    int topMargin = 15;
+    int badgeWidth = 240;
 
-    // {* NUEVO CÓDIGO: Acomodamos los títulos justo debajo del buscador *}
-    int listY = 30;
-    headerName.setBounds(310, listY, getWidth() - 300 - 140, 25);
+    searchBar.setBounds(315, topMargin, 250, 26);
+    bpmBox.setBounds(580, topMargin, 70, 26);
+    keyBox.setBounds(665, topMargin, 150, 26);
+    bpmDisplayLabel.setBounds(getWidth() - badgeWidth - 15, topMargin, badgeWidth, 26);
+
+    // Bajamos los títulos para que no se peguen a los buscadores
+    int listY = 55;
+    headerName.setBounds(315, listY, getWidth() - 300 - 150, 25);
     headerKey.setBounds(getWidth() - 130, listY, 60, 25);
     headerBPM.setBounds(getWidth() - 60, listY, 50, 25);
 
-    // Bajamos la lista (listY + 25) para que no tape los títulos
+    // Ajustamos la lista a su nueva posición
     fileList.setBounds(300, listY + 25, getWidth() - 300, getHeight() - (listY + 25) - 130 - 45);
 
-    bpmDisplayLabel.setBounds(getWidth() - 150, getHeight() - 175 - 25, 140, 25);
     waveformDisplay.setBounds(300, getHeight() - 175, getWidth() - 300, 130);
     transportControls.setBounds(300, getHeight() - 45, getWidth() - 300, 45);
 }
@@ -172,26 +206,35 @@ int MainComponent::getNumRows()
 
 void MainComponent::paintListBoxItem(int rowNumber, juce::Graphics& g, int width, int height, bool rowIsSelected)
 {
+    // {* ZEBRA STRIPING: Líneas intercaladas y Selección Premium *}
+    // {* ZEBRA STRIPING MINIMALISTA *}
     if (rowIsSelected)
-        g.fillAll(juce::Colours::darkcyan);
+    {
+        g.fillAll(juce::Colour(0xff2c313a)); // Sombreado elegante al seleccionar
+    }
+    else if (rowNumber % 2 == 0)
+    {
+        g.fillAll(juce::Colour(0xff121419)); // Fila Par: Fondo oscuro profundo
+    }
     else
-        g.fillAll(juce::Colours::transparentBlack);
+    {
+        g.fillAll(juce::Colour(0xff16191f)); // Fila Impar: Ligeramente más claro
+    }
 
     if (rowNumber < filteredAudioFiles.size())
     {
-        // 1. DIBUJAMOS EL NOMBRE
-        g.setColour(juce::Colours::white);
+        // 1. DIBUJAMOS EL NOMBRE (Añadimos margen de 15px para que respire)
+        g.setColour(juce::Colour(0xffabb2bf));
         g.setFont(14.0f);
-        // Acortamos el nombre para que no invada las columnas derechas
-        g.drawText(filteredAudioFiles[rowNumber].getFileName(), 10, 0, width - 150, height, juce::Justification::centredLeft, true);
+        g.drawText(filteredAudioFiles[rowNumber].getFileName(), 15, 0, width - 160, height, juce::Justification::centredLeft, true);
 
         // 2. DIBUJAMOS LA KEY
-        g.setColour(juce::Colours::grey);
+        g.setColour(juce::Colour(0xff5c6370));
         g.setFont(juce::Font(13.0f, juce::Font::bold));
         g.drawText(filteredKeys[rowNumber], width - 130, 0, 60, height, juce::Justification::centred, true);
 
         // 3. DIBUJAMOS EL BPM
-        g.setColour(juce::Colours::cyan);
+        g.setColour(juce::Colour(0xff56b6c2));
         g.drawText(filteredBPMs[rowNumber], width - 60, 0, 50, height, juce::Justification::centred, true);
     }
 }

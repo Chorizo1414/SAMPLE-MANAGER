@@ -3666,6 +3666,9 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\Source\CustomTheme.h">
+      <Filter>SAMPLE MANAGER\Source</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\Source\KeyDetector.h">
       <Filter>SAMPLE MANAGER\Source</Filter>
     </ClInclude>
