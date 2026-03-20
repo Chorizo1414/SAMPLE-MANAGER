@@ -75,7 +75,17 @@ TransportControls::TransportControls(juce::AudioTransportSource& transportToUse)
     tempoSlider.setDoubleClickReturnValue(true, 0.0);
 
     // --- ACCIONES DE LOS BOTONES ---
-    playButton.onClick = [this] { transportSource.start(); };
+    playButton.onClick = [this]
+        {
+            // Verificamos si el audio ya llegó al final de la pista
+            if (transportSource.hasStreamFinished() || transportSource.getCurrentPosition() >= transportSource.getLengthInSeconds())
+            {
+                // Lo regresamos al milisegundo 0.0
+                transportSource.setPosition(0.0);
+            }
+
+            transportSource.start();
+        };
     
     stopButton.onClick = [this] 
     { 

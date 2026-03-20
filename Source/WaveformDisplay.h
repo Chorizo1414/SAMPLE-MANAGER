@@ -14,6 +14,8 @@ public:
     void setAudioFile(const juce::File& file);
 
     void timerCallback() override; 
+    void mouseDown(const juce::MouseEvent& e) override;
+    void mouseDrag(const juce::MouseEvent& e) override;
 
 private:
     juce::AudioThumbnailCache thumbnailCache;

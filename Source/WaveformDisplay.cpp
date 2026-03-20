@@ -59,3 +59,38 @@ void WaveformDisplay::timerCallback()
     if (transportSource.isPlaying()) 
         repaint(); 
 }
+
+// {* NUEVO: Lógica de salto en el tiempo (Seeking) *}
+void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
+{
+    // Solo hacemos el salto si hay un archivo cargado y tiene duración
+    if (fileLoaded && transportSource.getLengthInSeconds() > 0.0)
+    {
+        // 1. Calculamos en qué porcentaje del ancho total hicimos clic
+        double clickProportion = (double)e.x / (double)getWidth();
+
+        // 2. Nos aseguramos de que el clic no se salga del 0% al 100% (evita errores)
+        clickProportion = juce::jlimit(0.0, 1.0, clickProportion);
+
+        // 3. Multiplicamos el porcentaje por la duración de la canción
+        double newPosition = clickProportion * transportSource.getLengthInSeconds();
+
+        // 4. Movemos la barra de reproducción a ese segundo exacto
+        transportSource.setPosition(newPosition);
+        repaint(); // Actualizamos la línea blanca al instante
+    }
+}
+
+void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
+{
+    // Hacemos exactamente lo mismo por si el usuario mantiene presionado el clic y arrastra
+    if (fileLoaded && transportSource.getLengthInSeconds() > 0.0)
+    {
+        double dragProportion = (double)e.x / (double)getWidth();
+        dragProportion = juce::jlimit(0.0, 1.0, dragProportion);
+        double newPosition = dragProportion * transportSource.getLengthInSeconds();
+
+        transportSource.setPosition(newPosition);
+        repaint();
+    }
+}

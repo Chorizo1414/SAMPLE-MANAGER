@@ -67,6 +67,13 @@ MainComponent::MainComponent()
     keyBox.setSelectedId(1, juce::dontSendNotification);
     keyBox.addListener(this);
 
+    addAndMakeVisible(typeBox);
+    typeBox.addItem("TODOS", 1);
+    typeBox.addItem("SOLO AUDIO", 2);
+    typeBox.addItem("SOLO MIDI", 3);
+    typeBox.setSelectedId(1, juce::dontSendNotification);
+    typeBox.addListener(this);
+
     addAndMakeVisible(waveformDisplay);
     addAndMakeVisible(transportControls);
 
@@ -152,9 +159,12 @@ void MainComponent::resized()
     int topMargin = 15;
     int badgeWidth = 240;
 
-    searchBar.setBounds(315, topMargin, 250, 26);
-    bpmBox.setBounds(580, topMargin, 70, 26);
-    keyBox.setBounds(665, topMargin, 150, 26);
+    // Matemáticas corregidas para que nada se encime:
+    searchBar.setBounds(315, topMargin, 180, 26); // Más corto para dar espacio
+    typeBox.setBounds(505, topMargin, 120, 26);   // Encaja perfecto después del buscador
+    bpmBox.setBounds(635, topMargin, 70, 26);     // Empujado a la derecha
+    keyBox.setBounds(715, topMargin, 140, 26);    // Empujado a la derecha
+
     bpmDisplayLabel.setBounds(getWidth() - badgeWidth - 15, topMargin, badgeWidth, 26);
 
     // Bajamos los títulos para que no se peguen a los buscadores
@@ -180,7 +190,8 @@ void MainComponent::selectionChanged()
     {
         std::function<void(const juce::File&)> searchSubfolders = [&](const juce::File& folderToSearch)
         {
-            juce::Array<juce::File> filesFound = folderToSearch.findChildFiles(juce::File::findFiles, false, "*.wav;*.mp3;*.aif");
+            // Le agregamos ;*.mid al final de la lista
+            juce::Array<juce::File> filesFound = folderToSearch.findChildFiles(juce::File::findFiles, false, "*.wav;*.mp3;*.aif;*.mid");
             audioFilesInFolder.addArray(filesFound);
 
             juce::Array<juce::File> subfoldersFound = folderToSearch.findChildFiles(juce::File::findDirectories, false);
@@ -239,10 +250,18 @@ void MainComponent::paintListBoxItem(int rowNumber, juce::Graphics& g, int width
     }
 }
 
-void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e) 
+void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
 {
-    // Dejamos vacío si prefieres que solo "selectedRowsChanged" haga el trabajo
-} 
+    if (fileList.getSelectedRow() == row)
+    {
+        juce::File selectedAudioFile = filteredAudioFiles[row];
+        if (!selectedAudioFile.hasFileExtension(".mid")) // <--- PROTECCIÓN MIDI
+        {
+            audioPlayer.loadFile(selectedAudioFile);
+            audioPlayer.play();
+        }
+    }
+}
 
 void MainComponent::selectedRowsChanged(int lastRowSelected)
 {
@@ -250,11 +269,14 @@ void MainComponent::selectedRowsChanged(int lastRowSelected)
     {
         juce::File selectedAudioFile = filteredAudioFiles[lastRowSelected];
         waveformDisplay.setAudioFile(selectedAudioFile);
+        analyzeBPM(selectedAudioFile);
 
-        analyzeBPM(selectedAudioFile); // <-- NUEVO: Dispara el escáner
-
-        audioPlayer.loadFile(selectedAudioFile);
-        audioPlayer.play();
+        // SOLO se reproduce si NO es MIDI
+        if (!selectedAudioFile.hasFileExtension(".mid"))
+        {
+            audioPlayer.loadFile(selectedAudioFile);
+            audioPlayer.play();
+        }
     }
 }
 
@@ -295,29 +317,40 @@ void MainComponent::applyFilters()
     juce::String bpmText = bpmBox.getText().toLowerCase();
 
     bool isAllKeys = (keyBox.getSelectedId() == 1);
-    juce::String selectedKey = isAllKeys ? "" : keyBox.getText().toLowerCase(); 
+    juce::String selectedKey = isAllKeys ? "" : keyBox.getText().toLowerCase();
 
     juce::String note = "";
     juce::String scale = "";
     if (!isAllKeys)
     {
-        note = selectedKey.upToFirstOccurrenceOf(" ", false, false).trim();   
-        scale = selectedKey.fromFirstOccurrenceOf(" ", false, false).trim();  
+        note = selectedKey.upToFirstOccurrenceOf(" ", false, false).trim();
+        scale = selectedKey.fromFirstOccurrenceOf(" ", false, false).trim();
     }
+
+    int typeFilter = typeBox.getSelectedId(); // Sacamos esto del 'for' para que sea más rápido
 
     for (auto& file : audioFilesInFolder)
     {
         juce::String fileName = file.getFileName().toLowerCase();
+        bool isMidi = file.hasFileExtension(".mid");
 
+        // 1. EVALUAMOS TIPO (Audio o MIDI)
+        bool matchesType = true;
+        if (typeFilter == 2 && isMidi) matchesType = false;  // Quería solo Audio, pero es MIDI
+        if (typeFilter == 3 && !isMidi) matchesType = false; // Quería solo MIDI, pero es Audio
+
+        // 2. EVALUAMOS TEXTO Y BPM
         bool matchesText = searchText.isEmpty() || fileName.contains(searchText);
         bool matchesBpm = bpmText.isEmpty() || fileName.contains(bpmText);
+
+        // 3. EVALUAMOS LA KEY
         bool matchesKey = true;
         if (!isAllKeys)
         {
-            juce::String var1 = note + " " + scale; 
-            juce::String var2 = note + scale;       
-            juce::String var3 = note + "_" + scale; 
-            juce::String var4 = note + "-" + scale; 
+            juce::String var1 = note + " " + scale;
+            juce::String var2 = note + scale;
+            juce::String var3 = note + "_" + scale;
+            juce::String var4 = note + "-" + scale;
 
             if (!fileName.contains(var1) && !fileName.contains(var2) && !fileName.contains(var3) && !fileName.contains(var4))
             {
@@ -325,31 +358,27 @@ void MainComponent::applyFilters()
             }
         }
 
-        if (matchesText && matchesBpm && matchesKey)
+        // 4. VEREDICTO FINAL: Si cumple todo, lo agregamos a la lista visual
+        if (matchesText && matchesBpm && matchesKey && matchesType)
         {
             filteredAudioFiles.add(file);
 
-            // El programa revisa la caché al instante
             juce::String filePath = file.getFullPathName();
             if (bpmDatabase.containsKey(filePath))
             {
-                // Si está en caché, cargamos todo de la memoria
                 filteredBPMs.add(bpmDatabase[filePath]);
 
                 juce::String savedKey = keyDatabase[filePath];
                 if (savedKey.isEmpty() || savedKey == "--")
-                    savedKey = extractKeyFromName(fileName); // Fallback de seguridad
+                    savedKey = extractKeyFromName(fileName);
 
                 filteredKeys.add(savedKey);
             }
             else
             {
-                // Si es virgen, intentamos extraer del nombre visualmente
                 filteredBPMs.add(extractBPMFromName(fileName));
                 filteredKeys.add(extractKeyFromName(fileName));
             }
-
-            // (¡Aquí había una línea extra que duplicaba los datos y rompía la lista! Ya la eliminamos)
         }
     }
 
@@ -395,6 +424,18 @@ juce::String MainComponent::extractKeyFromName(const juce::String& fileName)
 void MainComponent::analyzeBPM(const juce::File& file)
 {
     juce::String filePath = file.getFullPathName();
+
+    if (file.hasFileExtension(".mid"))
+    {
+        bpmDisplayLabel.setText("Archivo MIDI (Sin vista previa)", juce::dontSendNotification);
+        int index = filteredAudioFiles.indexOf(file);
+        if (index >= 0) {
+            filteredBPMs.set(index, "MIDI");
+            filteredKeys.set(index, "--");
+            fileList.repaintRow(index);
+        }
+        return;
+    }
 
     // --- EL BLOQUE CORREGIDO ---
     if (bpmDatabase.containsKey(filePath))

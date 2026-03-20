@@ -48,7 +48,7 @@ public:
 
 private:
     juce::TimeSliceThread directoryThread{ "Directory Thread" };
-    juce::WildcardFileFilter fileFilter{ "*.wav;*.mp3;*.aif", "*", "Audio Files" };
+    juce::WildcardFileFilter fileFilter{ "*.wav;*.mp3;*.aif;*.mid", "*", "Audio Files" };
     juce::DirectoryContentsList directoryList{ &fileFilter, directoryThread };
     juce::FileTreeComponent directoryTree{ directoryList };
 
@@ -56,6 +56,7 @@ private:
     juce::TextEditor searchBar;
     juce::TextEditor bpmBox;
     juce::ComboBox keyBox;
+    juce::ComboBox typeBox;
 
     juce::Label bpmDisplayLabel;
 
