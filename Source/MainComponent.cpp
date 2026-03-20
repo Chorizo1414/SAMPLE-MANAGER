@@ -19,8 +19,52 @@ MainComponent::MainComponent()
     // Colores del árbol de carpetas lateral (más claro para dar profundidad)
     directoryTree.setColour(juce::TreeView::backgroundColourId, juce::Colour(0xff1c1f26));
     directoryTree.setColour(juce::TreeView::linesColourId, juce::Colours::transparentBlack);
-
     directoryTree.addListener(this);
+
+    // {* NUEVO: Configuramos el botón de Audio *}
+    addAndMakeVisible(settingsButton);
+    settingsButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2c313a));
+    settingsButton.onClick = [this] {
+        // Invocamos el panel nativo de JUCE para tarjetas de sonido
+        auto* audioSettings = new juce::AudioDeviceSelectorComponent(deviceManager, 0, 0, 0, 2, false, false, true, false);
+        audioSettings->setSize(500, 400);
+
+        juce::DialogWindow::LaunchOptions options;
+        options.content.setOwned(audioSettings);
+        options.dialogTitle = "Configuracion de Audio";
+        options.dialogBackgroundColour = juce::Colour(0xff181a1f);
+        options.escapeKeyTriggersCloseButton = true;
+        options.useNativeTitleBar = true;
+        options.resizable = false;
+        options.launchAsync();
+        };
+
+    // {* NUEVO: Botón para elegir la carpeta de samples *}
+    addAndMakeVisible(chooseFolderButton);
+    chooseFolderButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff56b6c2)); // Cyan para que resalte
+    chooseFolderButton.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff121418)); // Letra oscura
+    chooseFolderButton.onClick = [this]
+        {
+            // Abrimos el explorador de Windows para que el usuario elija su carpeta
+            folderChooser = std::make_unique<juce::FileChooser>("Selecciona tu carpeta principal de samples", juce::File::getSpecialLocation(juce::File::userHomeDirectory), "*");
+
+            auto folderChooserFlags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories;
+
+            folderChooser->launchAsync(folderChooserFlags, [this](const juce::FileChooser& fc)
+                {
+                    juce::File chosenFolder = fc.getResult();
+                    if (chosenFolder.isDirectory())
+                    {
+                        // Guardamos la nueva raíz
+                        lastSelectedFolder = chosenFolder.getFullPathName();
+                        saveDatabase();
+
+                        // Le decimos al árbol que se actualice y muestre SOLO esa carpeta
+                        directoryList.setDirectory(chosenFolder, true, true);
+                    }
+                });
+        };
+
     databaseFile = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
         .getChildFile("SampleManager_BPM_Cache.xml");
     loadDatabase();
@@ -100,7 +144,9 @@ MainComponent::MainComponent()
     };
 
     directoryThread.startThread(juce::Thread::Priority::normal);
-    directoryList.setDirectory(juce::File("D:\\"), true, true);
+
+    juce::File startFolder(lastSelectedFolder.isEmpty() ? "C:\\" : lastSelectedFolder);
+    directoryList.setDirectory(startFolder, true, true);
 
     fileList.setColour(juce::ListBox::backgroundColourId, juce::Colour(0xff2b2b2b));
 
@@ -154,7 +200,12 @@ void MainComponent::paint(juce::Graphics& g)
 
 void MainComponent::resized()
 {
-    directoryTree.setBounds(0, 0, 300, getHeight());
+    // 1. Botón de agregar carpeta arriba (30px de alto)
+    chooseFolderButton.setBounds(0, 0, 300, 30);
+
+    // 2. El árbol de carpetas en medio
+    directoryTree.setBounds(0, 30, 300, getHeight() - 30 - 45);
+    settingsButton.setBounds(10, getHeight() - 35, 280, 26);
 
     int topMargin = 15;
     int badgeWidth = 240;
@@ -188,6 +239,7 @@ void MainComponent::selectionChanged()
 
     if (selectedFolder.isDirectory())
     {
+
         std::function<void(const juce::File&)> searchSubfolders = [&](const juce::File& folderToSearch)
         {
             // Le agregamos ;*.mid al final de la lista
@@ -545,6 +597,7 @@ void MainComponent::loadDatabase()
     std::unique_ptr<juce::XmlElement> xml = juce::XmlDocument::parse(databaseFile);
     if (xml != nullptr)
     {
+        lastSelectedFolder = xml->getStringAttribute("lastFolder", "C:\\");
         for (auto* child : xml->getChildIterator())
         {
             juce::String path = child->getStringAttribute("path");
@@ -560,6 +613,8 @@ void MainComponent::loadDatabase()
 void MainComponent::saveDatabase()
 {
     juce::XmlElement xml("BPM_CACHE");
+
+    xml.setAttribute("lastFolder", lastSelectedFolder);
 
     for (auto path : bpmDatabase.getAllKeys())
     {

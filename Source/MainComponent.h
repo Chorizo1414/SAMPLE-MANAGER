@@ -47,6 +47,10 @@ public:
     void analyzeBPM(const juce::File& file);
 
 private:
+    juce::TextButton chooseFolderButton{ "Agrega tu carpeta de samples" };
+    std::unique_ptr<juce::FileChooser> folderChooser; // Ventana nativa para elegir carpeta
+    juce::TextButton settingsButton{ "Configuracion de Audio" };
+    juce::String lastSelectedFolder;
     juce::TimeSliceThread directoryThread{ "Directory Thread" };
     juce::WildcardFileFilter fileFilter{ "*.wav;*.mp3;*.aif;*.mid", "*", "Audio Files" };
     juce::DirectoryContentsList directoryList{ &fileFilter, directoryThread };
