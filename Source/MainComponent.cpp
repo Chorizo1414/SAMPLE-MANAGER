@@ -126,6 +126,14 @@ MainComponent::MainComponent()
     transportControls.onPitchChanged = [this](double semitones) { audioPlayer.setPitch(semitones); };
     transportControls.onTempoChanged = [this](double multiplier) { audioPlayer.setTempo(multiplier); };
     transportControls.onStretchChanged = [this](bool enabled) { audioPlayer.setStretch(enabled); };
+    // {* NUEVO: Cables para los botones principales *}
+    transportControls.onPlayClicked = [this]() { audioPlayer.play(); };
+    transportControls.onStopClicked = [this]() { audioPlayer.stop(); };
+
+    // {* NUEVO: Cable para saltar con el clic en el panel MIDI *}
+    waveformDisplay.onMidiScrub = [this](double newTime) { audioPlayer.setMidiPosition(newTime); };
+    // Le enseñamos al panel visual a actualizarse a 30 FPS (Frames por segundo)
+    startTimerHz(30);
 
     transportControls.onRandomClicked = [this]()
     {
@@ -307,11 +315,10 @@ void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
     if (fileList.getSelectedRow() == row)
     {
         juce::File selectedAudioFile = filteredAudioFiles[row];
-        if (!selectedAudioFile.hasFileExtension(".mid")) // <--- PROTECCIÓN MIDI
-        {
-            audioPlayer.loadFile(selectedAudioFile);
-            audioPlayer.play();
-        }
+
+        // ¡Se fue el escudo! Ahora le mandamos todo al motor sin miedo.
+        audioPlayer.loadFile(selectedAudioFile);
+        audioPlayer.play();
     }
 }
 
@@ -323,12 +330,8 @@ void MainComponent::selectedRowsChanged(int lastRowSelected)
         waveformDisplay.setAudioFile(selectedAudioFile);
         analyzeBPM(selectedAudioFile);
 
-        // SOLO se reproduce si NO es MIDI
-        if (!selectedAudioFile.hasFileExtension(".mid"))
-        {
-            audioPlayer.loadFile(selectedAudioFile);
-            audioPlayer.play();
-        }
+        audioPlayer.loadFile(selectedAudioFile);
+        audioPlayer.play();
     }
 }
 
@@ -625,4 +628,18 @@ void MainComponent::saveDatabase()
     }
 
     xml.writeTo(databaseFile);
+}
+
+// {* NUEVO: El actualizador de la pantalla MIDI *}
+void MainComponent::timerCallback()
+{
+    if (audioPlayer.getIsMidiLoaded())
+    {
+        waveformDisplay.setMidiMode(true);
+        waveformDisplay.updateMidiPosition(audioPlayer.getMidiPosition(), audioPlayer.getMidiLength());
+    }
+    else
+    {
+        waveformDisplay.setMidiMode(false);
+    }
 }

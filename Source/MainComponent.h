@@ -16,7 +16,8 @@ class MainComponent  : public juce::AudioAppComponent,
                        public juce::ListBoxModel,
                        public juce::DragAndDropContainer,
                        public juce::TextEditor::Listener,
-                       public juce::ComboBox::Listener
+                       public juce::ComboBox::Listener,
+                       public juce::Timer
 { 
 public:
     MainComponent();
@@ -45,6 +46,7 @@ public:
     void comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged) override;
     void applyFilters();
     void analyzeBPM(const juce::File& file);
+    void timerCallback() override;
 
 private:
     juce::TextButton chooseFolderButton{ "Agrega tu carpeta de samples" };

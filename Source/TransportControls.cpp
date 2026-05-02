@@ -77,21 +77,20 @@ TransportControls::TransportControls(juce::AudioTransportSource& transportToUse)
     // --- ACCIONES DE LOS BOTONES ---
     playButton.onClick = [this]
         {
-            // Verificamos si el audio ya llegó al final de la pista
-            if (transportSource.hasStreamFinished() || transportSource.getCurrentPosition() >= transportSource.getLengthInSeconds())
+            if (onPlayClicked != nullptr) onPlayClicked();
+            else
             {
-                // Lo regresamos al milisegundo 0.0
-                transportSource.setPosition(0.0);
+                if (transportSource.hasStreamFinished() || transportSource.getCurrentPosition() >= transportSource.getLengthInSeconds())
+                    transportSource.setPosition(0.0);
+                transportSource.start();
             }
-
-            transportSource.start();
         };
-    
-    stopButton.onClick = [this] 
-    { 
-        transportSource.stop(); 
-        transportSource.setPosition(0.0); 
-    };
+
+    stopButton.onClick = [this]
+        {
+            if (onStopClicked != nullptr) onStopClicked();
+            else { transportSource.stop(); transportSource.setPosition(0.0); }
+        };
 
     volumeSlider.onValueChange = [this] { transportSource.setGain((float)volumeSlider.getValue()); };
 

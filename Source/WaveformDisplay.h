@@ -17,10 +17,18 @@ public:
     void mouseDown(const juce::MouseEvent& e) override;
     void mouseDrag(const juce::MouseEvent& e) override;
 
+    std::function<void(double)> onMidiScrub;
+    void setMidiMode(bool isMidi);
+    void updateMidiPosition(double position, double totalLength);
+
 private:
     juce::AudioThumbnailCache thumbnailCache;
     juce::AudioThumbnail thumbnail;
     bool fileLoaded = false;
+
+    bool isMidiMode = false;
+    double currentMidiPos = 0.0;
+    double totalMidiLength = 1.0;
 
     juce::AudioTransportSource& transportSource; 
 

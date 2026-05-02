@@ -15,6 +15,8 @@ public:
     bool isStretchEnabled() const;
 
     std::function<void(bool)> onLoopChanged;
+    std::function<void()> onPlayClicked;
+    std::function<void()> onStopClicked;
     std::function<void()> onRandomClicked;
     std::function<void(double)> onPitchChanged; // Cable del pitch
     std::function<void(bool)> onStretchChanged;

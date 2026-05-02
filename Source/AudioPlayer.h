@@ -19,8 +19,14 @@ public:
     void setVolume(float volume);
 
     void setPitch(double semitones);
-    void setTempo(double multiplier); // <-- Nuevo
+    void setTempo(double multiplier);
     void setStretch(bool enabled);
+
+    // {* NUEVO: Control total sobre el MIDI *}
+    bool getIsMidiLoaded() const { return isMidiLoaded; }
+    double getMidiPosition() const { return currentMidiTime; }
+    double getMidiLength() const { return midiSequence.getEndTime(); }
+    void setMidiPosition(double newPos) { currentMidiTime = newPos; synth.allNotesOff(0, false); }
 
     juce::AudioTransportSource& getTransportSource() { return transportSource; }
     juce::AudioFormatManager& getFormatManager() { return formatManager; }
@@ -34,10 +40,18 @@ private:
     juce::ResamplingAudioSource resamplerSource{ &soundTouchSource, false, 2 };
     std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
 
+    // {* NUEVO: Variables del Mini-Sintetizador *}
+    juce::Synthesiser synth;
+    juce::MidiMessageSequence midiSequence;
+    double currentMidiTime = 0.0;
+    double currentSampleRate = 44100.0;
+    bool isMidiLoaded = false;
+    bool isPlayingMidi = false;
+
     bool isLooping = false;
     bool isStretchEnabled = false;
     double currentPitchSemitones = 0.0;
-    double currentTempoMultiplier = 1.0; // <-- Nuevo
+    double currentTempoMultiplier = 1.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPlayer)
 };
