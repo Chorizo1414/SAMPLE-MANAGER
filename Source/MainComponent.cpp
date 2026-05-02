@@ -636,10 +636,12 @@ void MainComponent::timerCallback()
     if (audioPlayer.getIsMidiLoaded())
     {
         waveformDisplay.setMidiMode(true);
+        waveformDisplay.setMidiSequence(audioPlayer.getMidiSequence()); // <--- NUEVO
         waveformDisplay.updateMidiPosition(audioPlayer.getMidiPosition(), audioPlayer.getMidiLength());
     }
     else
     {
         waveformDisplay.setMidiMode(false);
+        waveformDisplay.setMidiSequence(nullptr); // <--- NUEVO
     }
 }

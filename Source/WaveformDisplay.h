@@ -20,6 +20,7 @@ public:
     std::function<void(double)> onMidiScrub;
     void setMidiMode(bool isMidi);
     void updateMidiPosition(double position, double totalLength);
+    void setMidiSequence(const juce::MidiMessageSequence* sequence);
 
 private:
     juce::AudioThumbnailCache thumbnailCache;
@@ -29,6 +30,7 @@ private:
     bool isMidiMode = false;
     double currentMidiPos = 0.0;
     double totalMidiLength = 1.0;
+    const juce::MidiMessageSequence* currentMidiSequence = nullptr;
 
     juce::AudioTransportSource& transportSource; 
 
