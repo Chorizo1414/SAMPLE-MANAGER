@@ -74,6 +74,14 @@ private:
     juce::Array<juce::File> audioFilesInFolder;
     juce::Array<juce::File> filteredAudioFiles;
 
+    // {* NUEVO: Filtro y cabecera de Categoría *}
+    juce::ComboBox categoryBox;
+    juce::Label headerCategory{ {}, "Type" };
+
+    // {* NUEVO: Memoria para las categorías *}
+    juce::StringArray filteredCategories;
+    juce::StringPairArray categoryDatabase;
+
     // {* NUEVO CÓDIGO: Arreglos paralelos y extractores *}
     juce::StringArray filteredBPMs;
     juce::StringArray filteredKeys; // <-- Para guardar la tonalidad

@@ -118,6 +118,19 @@ MainComponent::MainComponent()
     typeBox.setSelectedId(1, juce::dontSendNotification);
     typeBox.addListener(this);
 
+    // {* NUEVO: Filtro de Categoría y Título *}
+    addAndMakeVisible(categoryBox);
+    categoryBox.addItem("TODOS", 1);
+    categoryBox.addItem("SOLO LOOPS", 2);
+    categoryBox.addItem("SOLO ONE SHOTS", 3);
+    categoryBox.addItem("SOLO SAMPLES", 4);
+    categoryBox.setSelectedId(1, juce::dontSendNotification);
+    categoryBox.addListener(this);
+
+    addAndMakeVisible(headerCategory);
+    headerCategory.setColour(juce::Label::textColourId, juce::Colour(0xff6b7280));
+    headerCategory.setJustificationType(juce::Justification::centred);
+
     addAndMakeVisible(waveformDisplay);
     addAndMakeVisible(transportControls);
 
@@ -218,17 +231,19 @@ void MainComponent::resized()
     int topMargin = 15;
     int badgeWidth = 240;
 
-    // Matemáticas corregidas para que nada se encime:
-    searchBar.setBounds(315, topMargin, 180, 26); // Más corto para dar espacio
-    typeBox.setBounds(505, topMargin, 120, 26);   // Encaja perfecto después del buscador
-    bpmBox.setBounds(635, topMargin, 70, 26);     // Empujado a la derecha
-    keyBox.setBounds(715, topMargin, 140, 26);    // Empujado a la derecha
+    // Matemáticas corregidas para el nuevo menú:
+    searchBar.setBounds(315, topMargin, 140, 26);
+    categoryBox.setBounds(465, topMargin, 130, 26); // <-- Nuevo filtro
+    typeBox.setBounds(605, topMargin, 110, 26);
+    bpmBox.setBounds(725, topMargin, 70, 26);
+    keyBox.setBounds(805, topMargin, 130, 26);
 
     bpmDisplayLabel.setBounds(getWidth() - badgeWidth - 15, topMargin, badgeWidth, 26);
 
     // Bajamos los títulos para que no se peguen a los buscadores
     int listY = 55;
-    headerName.setBounds(315, listY, getWidth() - 300 - 150, 25);
+    headerName.setBounds(315, listY, getWidth() - 300 - 240, 25);
+    headerCategory.setBounds(getWidth() - 220, listY, 80, 25); // <-- Nuevo título
     headerKey.setBounds(getWidth() - 130, listY, 60, 25);
     headerBPM.setBounds(getWidth() - 60, listY, 50, 25);
 
@@ -294,17 +309,22 @@ void MainComponent::paintListBoxItem(int rowNumber, juce::Graphics& g, int width
 
     if (rowNumber < filteredAudioFiles.size())
     {
-        // 1. DIBUJAMOS EL NOMBRE (Añadimos margen de 15px para que respire)
+        // 1. DIBUJAMOS EL NOMBRE
         g.setColour(juce::Colour(0xffabb2bf));
         g.setFont(14.0f);
-        g.drawText(filteredAudioFiles[rowNumber].getFileName(), 15, 0, width - 160, height, juce::Justification::centredLeft, true);
+        g.drawText(filteredAudioFiles[rowNumber].getFileName(), 15, 0, width - 240, height, juce::Justification::centredLeft, true);
 
-        // 2. DIBUJAMOS LA KEY
+        // 2. DIBUJAMOS LA CATEGORÍA (Loop / One Shot)
+        g.setColour(juce::Colour(0xffc678dd)); // Moradito premium sutil
+        g.setFont(juce::Font(12.0f, juce::Font::bold));
+        g.drawText(filteredCategories[rowNumber], width - 220, 0, 80, height, juce::Justification::centred, true);
+
+        // 3. DIBUJAMOS LA KEY
         g.setColour(juce::Colour(0xff5c6370));
         g.setFont(juce::Font(13.0f, juce::Font::bold));
         g.drawText(filteredKeys[rowNumber], width - 130, 0, 60, height, juce::Justification::centred, true);
 
-        // 3. DIBUJAMOS EL BPM
+        // 4. DIBUJAMOS EL BPM
         g.setColour(juce::Colour(0xff56b6c2));
         g.drawText(filteredBPMs[rowNumber], width - 60, 0, 50, height, juce::Justification::centred, true);
     }
@@ -382,23 +402,36 @@ void MainComponent::applyFilters()
         scale = selectedKey.fromFirstOccurrenceOf(" ", false, false).trim();
     }
 
-    int typeFilter = typeBox.getSelectedId(); // Sacamos esto del 'for' para que sea más rápido
+    int typeFilter = typeBox.getSelectedId();
+    int catFilter = categoryBox.getSelectedId(); // 1:Todos, 2:Loops, 3:OneShots, 4:Samples
 
     for (auto& file : audioFilesInFolder)
     {
         juce::String fileName = file.getFileName().toLowerCase();
         bool isMidi = file.hasFileExtension(".mid");
+        juce::String filePath = file.getFullPathName();
 
-        // 1. EVALUAMOS TIPO (Audio o MIDI)
+        // Extraemos la categoría
+        juce::String currentCat = categoryDatabase.containsKey(filePath) ? categoryDatabase[filePath] : "--";
+        if (currentCat == "--" && !isMidi) {
+            if (fileName.contains("loop") || fileName.contains("bpm")) currentCat = "LOOP";
+            else if (fileName.contains("oneshot") || fileName.contains("kick") || fileName.contains("snare") || fileName.contains("hat") || fileName.contains("fx")) currentCat = "ONE SHOT";
+        }
+        if (isMidi) currentCat = "MIDI";
+
         bool matchesType = true;
-        if (typeFilter == 2 && isMidi) matchesType = false;  // Quería solo Audio, pero es MIDI
-        if (typeFilter == 3 && !isMidi) matchesType = false; // Quería solo MIDI, pero es Audio
+        if (typeFilter == 2 && isMidi) matchesType = false;
+        if (typeFilter == 3 && !isMidi) matchesType = false;
 
-        // 2. EVALUAMOS TEXTO Y BPM
+        // Evaluamos el filtro de Categoría
+        bool matchesCat = true;
+        if (catFilter == 2 && currentCat != "LOOP") matchesCat = false;
+        if (catFilter == 3 && currentCat != "ONE SHOT") matchesCat = false;
+        if (catFilter == 4 && currentCat != "SAMPLE") matchesCat = false;
+
         bool matchesText = searchText.isEmpty() || fileName.contains(searchText);
         bool matchesBpm = bpmText.isEmpty() || fileName.contains(bpmText);
 
-        // 3. EVALUAMOS LA KEY
         bool matchesKey = true;
         if (!isAllKeys)
         {
@@ -406,31 +439,20 @@ void MainComponent::applyFilters()
             juce::String var2 = note + scale;
             juce::String var3 = note + "_" + scale;
             juce::String var4 = note + "-" + scale;
-
             if (!fileName.contains(var1) && !fileName.contains(var2) && !fileName.contains(var3) && !fileName.contains(var4))
-            {
                 matchesKey = false;
-            }
         }
 
-        // 4. VEREDICTO FINAL: Si cumple todo, lo agregamos a la lista visual
-        if (matchesText && matchesBpm && matchesKey && matchesType)
+        if (matchesText && matchesBpm && matchesKey && matchesType && matchesCat)
         {
             filteredAudioFiles.add(file);
+            filteredCategories.add(currentCat); // Añadimos a la tabla visual
 
-            juce::String filePath = file.getFullPathName();
-            if (bpmDatabase.containsKey(filePath))
-            {
+            if (bpmDatabase.containsKey(filePath)) {
                 filteredBPMs.add(bpmDatabase[filePath]);
-
-                juce::String savedKey = keyDatabase[filePath];
-                if (savedKey.isEmpty() || savedKey == "--")
-                    savedKey = extractKeyFromName(fileName);
-
-                filteredKeys.add(savedKey);
+                filteredKeys.add(keyDatabase[filePath]);
             }
-            else
-            {
+            else {
                 filteredBPMs.add(extractBPMFromName(fileName));
                 filteredKeys.add(extractKeyFromName(fileName));
             }
@@ -487,6 +509,7 @@ void MainComponent::analyzeBPM(const juce::File& file)
         if (index >= 0) {
             filteredBPMs.set(index, "MIDI");
             filteredKeys.set(index, "--");
+            filteredCategories.set(index, "MIDI"); // <-- NUEVO
             fileList.repaintRow(index);
         }
         return;
@@ -511,23 +534,26 @@ void MainComponent::analyzeBPM(const juce::File& file)
         return;
     }
 
-    bpmDisplayLabel.setText("BPM: Calculando...", juce::dontSendNotification);
+    bpmDisplayLabel.setText("Analizando audio...", juce::dontSendNotification);
 
     auto* reader = audioPlayer.getFormatManager().createReaderFor(file);
     if (reader != nullptr)
     {
-        // Inicializamos la nueva inteligencia artificial de BTrack
+        // {* NUEVO: CLASIFICACIÓN POR DURACIÓN *}
+        // Calculamos cuántos segundos exactos dura el audio
+        // Calculamos cuántos segundos exactos dura el audio
+        double durationInSeconds = (double)reader->lengthInSamples / (double)reader->sampleRate;
+
+        // Inicializamos la IA
         BTrack bpmDetector;
         KeyDetector keyDetector(reader->sampleRate);
 
         int maxSeconds = 60;
         juce::int64 numSamplesToRead = juce::jmin(reader->lengthInSamples, (juce::int64)(reader->sampleRate * maxSeconds));
 
-        // BTrack procesa el audio en "cuadros" matemáticos de 512 samples
         int hopSize = 512;
         juce::AudioBuffer<float> buffer(reader->numChannels, hopSize);
         juce::HeapBlock<double> monoFrame(hopSize);
-
         juce::int64 samplesRead = 0;
 
         while (samplesRead < numSamplesToRead)
@@ -536,62 +562,118 @@ void MainComponent::analyzeBPM(const juce::File& file)
             buffer.clear();
             reader->read(&buffer, 0, samplesToGet, samplesRead, true, true);
 
-            // BTrack requiere que el audio sea Mono y en formato de alta precisión ('double')
             for (int i = 0; i < hopSize; ++i)
             {
                 if (i < samplesToGet)
                 {
                     float sum = 0.0f;
-                    // Mezclamos Izquierda y Derecha en un solo canal
                     for (int ch = 0; ch < reader->numChannels; ++ch)
                         sum += buffer.getReadPointer(ch)[i];
-
                     monoFrame[i] = (double)(sum / reader->numChannels);
                 }
-                else
-                {
-                    monoFrame[i] = 0.0; // Rellenamos con silencio si el sample es más corto
-                }
+                else { monoFrame[i] = 0.0; }
             }
 
-            // Alimentamos a la bestia cuadro por cuadro
             bpmDetector.processAudioFrame(monoFrame.getData());
             keyDetector.processAudioFrame(monoFrame.getData(), samplesToGet);
             samplesRead += samplesToGet;
         }
 
-        // Le pedimos el cálculo final a BTrack
         double detectedBPM = bpmDetector.getCurrentTempoEstimate();
         juce::String detectedKey = keyDetector.getDetectedKey();
         delete reader;
 
-        if (detectedBPM > 0.0)
+        // {* NUEVO CEREBRO DE CLASIFICACIÓN (Inteligencia Híbrida: Nombre + Duración) *}
+        juce::String fileNameLower = file.getFileName().toLowerCase();
+        juce::String audioType;
+
+        // 1. Buscamos palabras clave de la industria musical en el nombre
+        bool isExplicitLoop = fileNameLower.contains("loop") || fileNameLower.contains("bpm");
+        bool isExplicitOneShot = fileNameLower.contains("oneshot") || fileNameLower.contains("one shot") ||
+            fileNameLower.contains("fx") || fileNameLower.contains("impact") ||
+            fileNameLower.contains("crash") || fileNameLower.contains("riser") ||
+            fileNameLower.contains("sweep") || fileNameLower.contains("cymbal") ||
+            fileNameLower.contains("kick") || fileNameLower.contains("snare") ||
+            fileNameLower.contains("clap") || fileNameLower.contains("hat") ||
+            fileNameLower.contains("808") || fileNameLower.contains("shaker") ||
+            fileNameLower.contains("perc") || fileNameLower.contains("tom") ||
+            fileNameLower.contains("vocal") || fileNameLower.contains("chant") ||
+            fileNameLower.contains("fill");
+
+        // 2. Tomamos la decisión final con máxima precisión
+        if (isExplicitOneShot)
+        {
+            audioType = "ONE SHOT";
+            detectedBPM = 0.0; // ¡Apagamos el BPM falso del eco!
+        }
+        else if (isExplicitLoop)
+        {
+            audioType = "LOOP";
+        }
+        else
+        {
+            // Si el nombre no dice nada, usamos la física (Tolerancia de 3.5s para colas normales)
+            if (durationInSeconds <= 3.5)
+            {
+                audioType = "ONE SHOT";
+                detectedBPM = 0.0;
+            }
+            else if (detectedBPM > 0.0)
+            {
+                audioType = "LOOP";
+            }
+            else
+            {
+                audioType = "SAMPLE";
+            }
+        }
+
+        // 3. Rescate de BPM (Confiamos más en el texto del nombre que en la IA para los Loops)
+        juce::String nameBPM = extractBPMFromName(file.getFileName());
+        if (nameBPM != "--" && audioType == "LOOP")
+        {
+            detectedBPM = nameBPM.getDoubleValue(); // El productor original siempre tiene la razón
+        }
+
+        // {* LÓGICA DE ETIQUETADO VISUAL Y GUARDADO *}
+        int index = filteredAudioFiles.indexOf(file);
+
+        if (audioType == "LOOP")
         {
             int finalBPM = std::round(detectedBPM);
             juce::String bpmString = juce::String(finalBPM);
 
-            bpmDisplayLabel.setText("BPM: " + bpmString + " | Key: " + detectedKey, juce::dontSendNotification);
+            bpmDisplayLabel.setText(audioType + " | BPM: " + bpmString + " | Key: " + detectedKey, juce::dontSendNotification);
 
-            int index = filteredAudioFiles.indexOf(file);
-            if (index >= 0)
-            {
+            if (index >= 0) {
                 filteredBPMs.set(index, bpmString);
-                filteredKeys.set(index, detectedKey); // <--- NUEVO: Actualiza la tabla visual
+                filteredKeys.set(index, detectedKey);
+                filteredCategories.set(index, audioType); // <-- Pinta
                 fileList.repaintRow(index);
             }
-
             bpmDatabase.set(filePath, bpmString);
-            keyDatabase.set(filePath, detectedKey); // <--- NUEVO: Guarda en RAM
-            saveDatabase();                         // <--- NUEVO: Guarda en XML
+            keyDatabase.set(filePath, detectedKey);
+            categoryDatabase.set(filePath, audioType); // <-- Guarda en RAM
         }
         else
         {
-            bpmDisplayLabel.setText("BPM: --", juce::dontSendNotification);
+            bpmDisplayLabel.setText(audioType + " | Key: " + detectedKey, juce::dontSendNotification);
+
+            if (index >= 0) {
+                filteredBPMs.set(index, "--");
+                filteredKeys.set(index, detectedKey);
+                filteredCategories.set(index, audioType); // <-- Pinta
+                fileList.repaintRow(index);
+            }
+            bpmDatabase.set(filePath, "--");
+            keyDatabase.set(filePath, detectedKey);
+            categoryDatabase.set(filePath, audioType); // <-- Guarda en RAM
         }
+        saveDatabase();
     }
     else
     {
-        bpmDisplayLabel.setText("BPM: Error", juce::dontSendNotification);
+        bpmDisplayLabel.setText("Archivo corrupto", juce::dontSendNotification);
     }
 }
 
@@ -605,10 +687,12 @@ void MainComponent::loadDatabase()
         {
             juce::String path = child->getStringAttribute("path");
             juce::String bpm = child->getStringAttribute("bpm");
-            juce::String key = child->getStringAttribute("key", "--"); // <-- Lee la Key
+            juce::String key = child->getStringAttribute("key", "--");
+            juce::String cat = child->getStringAttribute("category", "--"); // <-- NUEVO
 
             bpmDatabase.set(path, bpm);
-            keyDatabase.set(path, key); // <-- La guarda en memoria RAM
+            keyDatabase.set(path, key);
+            categoryDatabase.set(path, cat); // <-- NUEVO
         }
     }
 }
@@ -624,7 +708,8 @@ void MainComponent::saveDatabase()
         auto* child = xml.createNewChildElement("FILE");
         child->setAttribute("path", path);
         child->setAttribute("bpm", bpmDatabase[path]);
-        child->setAttribute("key", keyDatabase[path]); // <-- Escribe la Key en el disco duro
+        child->setAttribute("key", keyDatabase[path]);
+        child->setAttribute("category", categoryDatabase[path]); // <-- NUEVO
     }
 
     xml.writeTo(databaseFile);
