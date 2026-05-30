@@ -97,6 +97,11 @@ private:
     juce::String extractBPMFromName(const juce::String& fileName);
     juce::String extractKeyFromName(const juce::String& fileName); // <-- Nuevo extractor
 
+    // {* NUEVO: Rastreadores de estado para el render offline *}
+    double currentPitchSemitones = 0.0;
+    double currentTempoMultiplier = 1.0;
+    bool isStretchEnabled = false;
+
     AudioPlayer audioPlayer;
 
     // 2. Los paneles visuales que se conectan al motor

@@ -135,10 +135,12 @@ MainComponent::MainComponent()
     addAndMakeVisible(transportControls);
 
     // Conectamos los controles visuales con nuestro nuevo motor de audio
+    // Conectamos los controles visuales con nuestro nuevo motor de audio
     transportControls.onLoopChanged = [this](bool shouldLoop) { audioPlayer.setLooping(shouldLoop); };
-    transportControls.onPitchChanged = [this](double semitones) { audioPlayer.setPitch(semitones); };
-    transportControls.onTempoChanged = [this](double multiplier) { audioPlayer.setTempo(multiplier); };
-    transportControls.onStretchChanged = [this](bool enabled) { audioPlayer.setStretch(enabled); };
+    transportControls.onPitchChanged = [this](double semitones) { audioPlayer.setPitch(semitones); currentPitchSemitones = semitones; };
+    transportControls.onTempoChanged = [this](double multiplier) { audioPlayer.setTempo(multiplier); currentTempoMultiplier = multiplier; };
+    transportControls.onStretchChanged = [this](bool enabled) { audioPlayer.setStretch(enabled); isStretchEnabled = enabled; };
+
     // {* NUEVO: Cables para los botones principales *}
     transportControls.onPlayClicked = [this]() { audioPlayer.play(); };
     transportControls.onStopClicked = [this]() { audioPlayer.stop(); };
@@ -439,21 +441,146 @@ void MainComponent::selectedRowsChanged(int lastRowSelected)
     }
 }
 
-void MainComponent::mouseDrag(const juce::MouseEvent& e) 
-{ 
-    if (e.getDistanceFromDragStart() < 3) 
-        return; 
+void MainComponent::mouseDrag(const juce::MouseEvent& e)
+{
+    if (e.getDistanceFromDragStart() < 3)
+        return;
 
-    if (fileList.isParentOf(e.originalComponent) || e.originalComponent == &fileList) 
-    { 
-        int row = fileList.getSelectedRow(); 
+    if (fileList.isParentOf(e.originalComponent) || e.originalComponent == &fileList)
+    {
+        int row = fileList.getSelectedRow();
         if (row >= 0 && row < filteredAudioFiles.size())
-        { 
-            juce::StringArray filesToDrag; 
-            filesToDrag.add(filteredAudioFiles[row].getFullPathName());
-            juce::DragAndDropContainer::performExternalDragDropOfFiles(filesToDrag, false, this); 
-        } 
-    } 
+        {
+            juce::File selectedFile = filteredAudioFiles[row];
+            juce::StringArray filesToDrag;
+
+            // Regla: Si es MIDI o no hay alteraciones, exportamos el original rápido
+            bool hasProcessing = (currentPitchSemitones != 0.0 || currentTempoMultiplier != 1.0);
+            if (selectedFile.hasFileExtension(".mid") || !hasProcessing)
+            {
+                filesToDrag.add(selectedFile.getFullPathName());
+                juce::DragAndDropContainer::performExternalDragDropOfFiles(filesToDrag, false, this);
+                return;
+            }
+
+            // --- MOTOR DE EXPORTACIÓN AVANZADO (Con Sistema Dual: Stretch + Resampler) ---
+            juce::File tempDir = juce::File::getSpecialLocation(juce::File::tempDirectory);
+            juce::String uniqueName = "Processed_" + juce::String(juce::Time::currentTimeMillis()) + "_" + selectedFile.getFileNameWithoutExtension() + ".wav";
+            juce::File tempFile = tempDir.getChildFile(uniqueName);
+
+            auto* reader = audioPlayer.getFormatManager().createReaderFor(selectedFile);
+            if (reader != nullptr)
+            {
+                auto readerSource = std::make_unique<juce::AudioFormatReaderSource>(reader, true);
+
+                // 1. RECREAMOS LA CADENA DE AUDIO EXACTA DE TU REPRODUCTOR
+                SoundTouchAudioSource offlineSoundTouch(readerSource.get());
+                juce::ResamplingAudioSource offlineResampler(&offlineSoundTouch, false, 2);
+
+                // {* EL ARREGLO: PRIMERO INICIAMOS LOS MOTORES (Para que no borren las instrucciones) *}
+                readerSource->prepareToPlay(512, reader->sampleRate);
+                offlineSoundTouch.prepareToPlay(512, reader->sampleRate);
+                offlineResampler.prepareToPlay(512, reader->sampleRate);
+
+                double effectiveMultiplier = 1.0;
+
+                // 2. LUEGO APLICAMOS LA LÓGICA Y LOS PARÁMETROS
+                if (isStretchEnabled)
+                {
+                    // Modo Warp / Stretch (Conserva el tiempo original)
+                    offlineSoundTouch.setStretchEnabled(true);
+                    offlineSoundTouch.setPitchSemiTones(currentPitchSemitones);
+                    offlineSoundTouch.setTempoMultiplier(currentTempoMultiplier);
+                    offlineResampler.setResamplingRatio(1.0);
+                    effectiveMultiplier = currentTempoMultiplier;
+                }
+                else
+                {
+                    // Modo Vinilo clásico (Alterar pitch cambia la velocidad)
+                    offlineSoundTouch.setStretchEnabled(false);
+                    offlineSoundTouch.setPitchSemiTones(0.0);
+                    offlineSoundTouch.setTempoMultiplier(1.0);
+
+                    double pitchRatio = std::pow(2.0, currentPitchSemitones / 12.0);
+                    double finalRatio = pitchRatio * currentTempoMultiplier;
+                    offlineResampler.setResamplingRatio(finalRatio);
+                    effectiveMultiplier = finalRatio;
+                }
+
+                auto outStream = new juce::FileOutputStream(tempFile);
+                if (outStream->openedOk())
+                {
+                    juce::WavAudioFormat wavFormat;
+                    std::unique_ptr<juce::AudioFormatWriter> writer(wavFormat.createWriterFor(
+                        outStream,
+                        reader->sampleRate,
+                        reader->numChannels,
+                        16,
+                        {},
+                        0));
+
+                    if (writer != nullptr)
+                    {
+                        // Calculamos cuánto va a durar el audio nuevo basado en las matemáticas
+                        double estimatedDuration = (reader->lengthInSamples / reader->sampleRate) / effectiveMultiplier;
+                        juce::int64 estimatedSamples = (juce::int64)(estimatedDuration * reader->sampleRate);
+
+                        juce::AudioBuffer<float> renderBuffer(reader->numChannels, 512);
+                        juce::AudioSourceChannelInfo info(&renderBuffer, 0, 512);
+
+                        juce::int64 samplesWritten = 0;
+                        int consecutiveSilenceBlocks = 0;
+
+                        while (samplesWritten < estimatedSamples + (reader->sampleRate * 2.0))
+                        {
+                            renderBuffer.clear();
+
+                            // LE PEDIMOS EL AUDIO AL ÚLTIMO ESLABÓN DE LA CADENA (El Resampler)
+                            offlineResampler.getNextAudioBlock(info);
+
+                            float magnitude = renderBuffer.getMagnitude(0, 512);
+                            if (magnitude < 0.0001f && samplesWritten >= estimatedSamples)
+                            {
+                                consecutiveSilenceBlocks++;
+                                if (consecutiveSilenceBlocks > 10) break; // Terminar si hay silencio absoluto
+                            }
+                            else
+                            {
+                                consecutiveSilenceBlocks = 0;
+                            }
+
+                            writer->writeFromAudioSampleBuffer(renderBuffer, 0, 512);
+                            samplesWritten += 512;
+                        }
+
+                        // Destruimos el escritor primero para soltar el candado de Windows
+                        writer.reset();
+                        offlineResampler.releaseResources();
+                        offlineSoundTouch.releaseResources();
+                        readerSource->releaseResources();
+
+                        filesToDrag.add(tempFile.getFullPathName());
+                    }
+                    else
+                    {
+                        delete outStream;
+                        filesToDrag.add(selectedFile.getFullPathName());
+                    }
+                }
+                else
+                {
+                    delete outStream;
+                    filesToDrag.add(selectedFile.getFullPathName());
+                }
+            }
+            else
+            {
+                filesToDrag.add(selectedFile.getFullPathName());
+            }
+
+            juce::DragAndDropContainer::performExternalDragDropOfFiles(filesToDrag, false, this);
+        }
+    }
 }
 
 void MainComponent::textEditorTextChanged(juce::TextEditor& editor)
