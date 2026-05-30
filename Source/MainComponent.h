@@ -89,6 +89,7 @@ private:
     juce::StringPairArray bpmDatabase; // Un diccionario que guarda "Ruta del Archivo" = "BPM"
     juce::StringPairArray keyDatabase;
     juce::File databaseFile;           // El archivo físico en tu disco duro
+    juce::StringPairArray learnedPatternsDatabase; // {* NUEVO: Guarda palabras_clave = tipo_archivo *}
 
     void loadDatabase();
     void saveDatabase();

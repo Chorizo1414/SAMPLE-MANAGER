@@ -332,13 +332,97 @@ void MainComponent::paintListBoxItem(int rowNumber, juce::Graphics& g, int width
 
 void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
 {
-    if (fileList.getSelectedRow() == row)
-    {
-        juce::File selectedAudioFile = filteredAudioFiles[row];
+    if (row < 0 || row >= filteredAudioFiles.size()) return;
 
-        // ¡Se fue el escudo! Ahora le mandamos todo al motor sin miedo.
-        audioPlayer.loadFile(selectedAudioFile);
-        audioPlayer.play();
+    juce::File selectedAudioFile = filteredAudioFiles[row];
+    juce::String filePath = selectedAudioFile.getFullPathName();
+
+    // {* SI EL USUARIO HACE CLIC DERECHO (OVERRIDE MANUAL) *}
+    if (e.mods.isPopupMenu())
+    {
+        juce::PopupMenu menu;
+        menu.addItem(1, "Forzar como LOOP");
+        menu.addItem(2, "Forzar como ONE SHOT");
+        menu.addItem(3, "Forzar como SAMPLE");
+        menu.addSeparator();
+        menu.addItem(4, "Corregir BPM manualmente...");
+
+        menu.showMenuAsync(juce::PopupMenu::Options(), [this, row, selectedAudioFile, filePath](int result)
+            {
+                if (result == 0) return; // Si cerró el menú sin elegir nada
+
+                juce::String parentFolder = selectedAudioFile.getParentDirectory().getFileName().toLowerCase();
+
+                if (result >= 1 && result <= 3)
+                {
+                    juce::String newType = (result == 1) ? "LOOP" : (result == 2) ? "ONE SHOT" : "SAMPLE";
+
+                    // 1. Corregimos los datos visuales en tiempo real
+                    filteredCategories.set(row, newType);
+                    categoryDatabase.set(filePath, newType);
+
+                    if (newType != "LOOP")
+                    {
+                        filteredBPMs.set(row, "--");
+                        bpmDatabase.set(filePath, "--");
+                    }
+
+                    // 2. ¡SISTEMA DE APRENDIZAJE AUTÓNOMO!
+                    // El programa memoriza que esta palabra en la carpeta padre significa esta categoría
+                    if (parentFolder.isNotEmpty() && parentFolder.length() > 2)
+                    {
+                        learnedPatternsDatabase.set(parentFolder, newType);
+                    }
+
+                    fileList.repaintRow(row);
+                    saveDatabase();
+                    applyFilters();
+                }
+                else if (result == 4) // Corregir BPM por cuadro de texto
+                {
+                    // 1. Construimos la ventana de alerta manualmente
+                    auto* alert = new juce::AlertWindow("Corregir BPM", "Introduce el BPM correcto para este sample:", juce::AlertWindow::NoIcon);
+
+                    // 2. Le agregamos el cuadro de texto y los botones
+                    alert->addTextEditor("bpmInput", filteredBPMs[row], "BPM:");
+                    alert->addButton("Guardar", 1, juce::KeyPress(juce::KeyPress::returnKey, 0, 0));
+                    alert->addButton("Cancelar", 0, juce::KeyPress(juce::KeyPress::escapeKey, 0, 0));
+
+                    // {* EL ARREGLO: Pasamos 'false' para que JUCE no nos borre la memoria antes de tiempo *}
+                    alert->enterModalState(false, juce::ModalCallbackFunction::create([this, filePath, alert](int buttonResult)
+                        {
+                            if (buttonResult == 1) // Si el usuario hizo clic en "Guardar" o presionó Enter
+                            {
+                                // Ahora es 100% seguro leer el texto porque la ventana sigue viva en la memoria
+                                juce::String input = alert->getTextEditorContents("bpmInput");
+
+                                if (input.isNotEmpty() && input.getIntValue() > 0)
+                                {
+                                    juce::String bpmString = juce::String(input.getIntValue());
+
+                                    // Actualizamos la base de datos maestra
+                                    bpmDatabase.set(filePath, bpmString);
+                                    categoryDatabase.set(filePath, "LOOP");
+
+                                    // Refrescamos TODA la UI y guardamos en el XML para que el cambio se vea al instante
+                                    saveDatabase();
+                                    applyFilters();
+                                }
+                            }
+
+                            // {* MAGIA: Destruimos la ventana manualmente al terminar el trabajo *}
+                            delete alert;
+                        }));
+                }
+            });
+    }
+    else // {* CLIC IZQUIERDO NORMAL: REPRODUCIR *}
+    {
+        if (fileList.getSelectedRow() == row)
+        {
+            audioPlayer.loadFile(selectedAudioFile);
+            audioPlayer.play();
+        }
     }
 }
 
@@ -387,6 +471,7 @@ void MainComponent::applyFilters()
     filteredAudioFiles.clear();
     filteredBPMs.clear();
     filteredKeys.clear();
+    filteredCategories.clear(); // <-- Faltaba limpiar la memoria visual aquí
 
     juce::String searchText = searchBar.getText().toLowerCase();
     juce::String bpmText = bpmBox.getText().toLowerCase();
@@ -413,10 +498,36 @@ void MainComponent::applyFilters()
 
         // Extraemos la categoría
         juce::String currentCat = categoryDatabase.containsKey(filePath) ? categoryDatabase[filePath] : "--";
-        if (currentCat == "--" && !isMidi) {
-            if (fileName.contains("loop") || fileName.contains("bpm")) currentCat = "LOOP";
-            else if (fileName.contains("oneshot") || fileName.contains("kick") || fileName.contains("snare") || fileName.contains("hat") || fileName.contains("fx")) currentCat = "ONE SHOT";
+        if (currentCat == "--" && !isMidi)
+        {
+            juce::String parentFolder = file.getParentDirectory().getFileName().toLowerCase();
+
+            // {* CONSULTA AL MOTOR DE APRENDIZAJE AUTÓNOMO *}
+            for (auto& keyword : learnedPatternsDatabase.getAllKeys())
+            {
+                if (parentFolder.contains(keyword.toLowerCase()))
+                {
+                    currentCat = learnedPatternsDatabase[keyword];
+                    break;
+                }
+            }
+
+            if (currentCat == "--")
+            {
+                bool isLoopHint = fileName.contains("loop") || fileName.contains("bpm") ||
+                    parentFolder.contains("loop") || parentFolder.contains("melody");
+
+                bool isOneShotHint = fileName.contains("oneshot") || fileName.contains("kick") ||
+                    fileName.contains("snare") || fileName.contains("hat") ||
+                    fileName.contains("fx") || parentFolder.contains("oneshot") ||
+                    parentFolder.contains("one shot") || parentFolder.contains("drum") ||
+                    parentFolder.contains("cymbal") || parentFolder.contains("perc");
+
+                if (isLoopHint) currentCat = "LOOP";
+                else if (isOneShotHint) currentCat = "ONE SHOT";
+            }
         }
+
         if (isMidi) currentCat = "MIDI";
 
         bool matchesType = true;
@@ -509,26 +620,24 @@ void MainComponent::analyzeBPM(const juce::File& file)
         if (index >= 0) {
             filteredBPMs.set(index, "MIDI");
             filteredKeys.set(index, "--");
-            filteredCategories.set(index, "MIDI"); // <-- NUEVO
+            filteredCategories.set(index, "MIDI");
             fileList.repaintRow(index);
         }
         return;
     }
 
-    // --- EL BLOQUE CORREGIDO ---
     if (bpmDatabase.containsKey(filePath))
     {
         juce::String savedBPM = bpmDatabase[filePath];
         juce::String savedKey = keyDatabase[filePath];
         if (savedKey.isEmpty()) savedKey = "--";
 
-        // Ahora sí imprime ambos datos al cargar de la memoria
         bpmDisplayLabel.setText("BPM: " + savedBPM + " | Key: " + savedKey, juce::dontSendNotification);
 
         int index = filteredAudioFiles.indexOf(file);
         if (index >= 0) {
             filteredBPMs.set(index, savedBPM);
-            filteredKeys.set(index, savedKey); // Faltaba actualizar la tabla visual aquí
+            filteredKeys.set(index, savedKey);
             fileList.repaintRow(index);
         }
         return;
@@ -539,12 +648,8 @@ void MainComponent::analyzeBPM(const juce::File& file)
     auto* reader = audioPlayer.getFormatManager().createReaderFor(file);
     if (reader != nullptr)
     {
-        // {* NUEVO: CLASIFICACIÓN POR DURACIÓN *}
-        // Calculamos cuántos segundos exactos dura el audio
-        // Calculamos cuántos segundos exactos dura el audio
         double durationInSeconds = (double)reader->lengthInSamples / (double)reader->sampleRate;
 
-        // Inicializamos la IA
         BTrack bpmDetector;
         KeyDetector keyDetector(reader->sampleRate);
 
@@ -555,6 +660,11 @@ void MainComponent::analyzeBPM(const juce::File& file)
         juce::AudioBuffer<float> buffer(reader->numChannels, hopSize);
         juce::HeapBlock<double> monoFrame(hopSize);
         juce::int64 samplesRead = 0;
+
+        int peakCount = 0;
+        int cooldownSamples = 0;
+        const int cooldownThreshold = (int)(reader->sampleRate * 0.15);
+        double runningAverage = 0.0;
 
         while (samplesRead < numSamplesToRead)
         {
@@ -569,7 +679,19 @@ void MainComponent::analyzeBPM(const juce::File& file)
                     float sum = 0.0f;
                     for (int ch = 0; ch < reader->numChannels; ++ch)
                         sum += buffer.getReadPointer(ch)[i];
+
                     monoFrame[i] = (double)(sum / reader->numChannels);
+
+                    double absSample = std::abs(monoFrame[i]);
+                    runningAverage = 0.999 * runningAverage + 0.001 * absSample;
+
+                    if (cooldownSamples > 0) cooldownSamples--;
+
+                    if (absSample > runningAverage * 3.0 && absSample > 0.05 && cooldownSamples == 0)
+                    {
+                        peakCount++;
+                        cooldownSamples = cooldownThreshold;
+                    }
                 }
                 else { monoFrame[i] = 0.0; }
             }
@@ -583,28 +705,55 @@ void MainComponent::analyzeBPM(const juce::File& file)
         juce::String detectedKey = keyDetector.getDetectedKey();
         delete reader;
 
-        // {* NUEVO CEREBRO DE CLASIFICACIÓN (Inteligencia Híbrida: Nombre + Duración) *}
         juce::String fileNameLower = file.getFileName().toLowerCase();
         juce::String audioType;
+        juce::String parentFolder = file.getParentDirectory().getFileName().toLowerCase();
 
-        // 1. Buscamos palabras clave de la industria musical en el nombre
-        bool isExplicitLoop = fileNameLower.contains("loop") || fileNameLower.contains("bpm");
-        bool isExplicitOneShot = fileNameLower.contains("oneshot") || fileNameLower.contains("one shot") ||
-            fileNameLower.contains("fx") || fileNameLower.contains("impact") ||
-            fileNameLower.contains("crash") || fileNameLower.contains("riser") ||
-            fileNameLower.contains("sweep") || fileNameLower.contains("cymbal") ||
-            fileNameLower.contains("kick") || fileNameLower.contains("snare") ||
-            fileNameLower.contains("clap") || fileNameLower.contains("hat") ||
-            fileNameLower.contains("808") || fileNameLower.contains("shaker") ||
-            fileNameLower.contains("perc") || fileNameLower.contains("tom") ||
-            fileNameLower.contains("vocal") || fileNameLower.contains("chant") ||
-            fileNameLower.contains("fill");
+        bool learnedTypeFound = false;
+        for (auto& keyword : learnedPatternsDatabase.getAllKeys())
+        {
+            if (parentFolder.contains(keyword.toLowerCase()))
+            {
+                audioType = learnedPatternsDatabase[keyword];
+                learnedTypeFound = true;
+                if (audioType == "ONE SHOT" || audioType == "SAMPLE") detectedBPM = 0.0;
+                break;
+            }
+        }
 
-        // 2. Tomamos la decisión final con máxima precisión
-        if (isExplicitOneShot)
+        bool isExplicitLoop = false;
+        bool isExplicitOneShot = false;
+
+        if (!learnedTypeFound)
+        {
+            isExplicitLoop = fileNameLower.contains("loop") || fileNameLower.contains("bpm") ||
+                parentFolder.contains("loop") || parentFolder.contains("melody");
+
+            isExplicitOneShot = fileNameLower.contains("oneshot") || fileNameLower.contains("one shot") ||
+                fileNameLower.contains("fx") || fileNameLower.contains("impact") ||
+                fileNameLower.contains("crash") || fileNameLower.contains("riser") ||
+                fileNameLower.contains("sweep") || fileNameLower.contains("cymbal") ||
+                fileNameLower.contains("kick") || fileNameLower.contains("snare") ||
+                fileNameLower.contains("clap") || fileNameLower.contains("hat") ||
+                fileNameLower.contains("808") || fileNameLower.contains("shaker") ||
+                fileNameLower.contains("perc") || fileNameLower.contains("tom") ||
+                fileNameLower.contains("vocal") || fileNameLower.contains("chant") ||
+                fileNameLower.contains("fill") ||
+                parentFolder.contains("oneshot") || parentFolder.contains("one shot") ||
+                parentFolder.contains("drum") || parentFolder.contains("fx") ||
+                parentFolder.contains("kick") || parentFolder.contains("snare") ||
+                parentFolder.contains("hat") || parentFolder.contains("perc") ||
+                parentFolder.contains("cymbal");
+        }
+
+        if (learnedTypeFound)
+        {
+            // audioType ya se definió por la base de datos de aprendizaje
+        }
+        else if (isExplicitOneShot)
         {
             audioType = "ONE SHOT";
-            detectedBPM = 0.0; // ¡Apagamos el BPM falso del eco!
+            detectedBPM = 0.0;
         }
         else if (isExplicitLoop)
         {
@@ -612,15 +761,19 @@ void MainComponent::analyzeBPM(const juce::File& file)
         }
         else
         {
-            // Si el nombre no dice nada, usamos la física (Tolerancia de 3.5s para colas normales)
             if (durationInSeconds <= 3.5)
             {
                 audioType = "ONE SHOT";
                 detectedBPM = 0.0;
             }
-            else if (detectedBPM > 0.0)
+            else if (detectedBPM > 0.0 && peakCount >= 4)
             {
                 audioType = "LOOP";
+            }
+            else if (peakCount < 4)
+            {
+                audioType = "ONE SHOT";
+                detectedBPM = 0.0;
             }
             else
             {
@@ -628,14 +781,12 @@ void MainComponent::analyzeBPM(const juce::File& file)
             }
         }
 
-        // 3. Rescate de BPM (Confiamos más en el texto del nombre que en la IA para los Loops)
         juce::String nameBPM = extractBPMFromName(file.getFileName());
         if (nameBPM != "--" && audioType == "LOOP")
         {
-            detectedBPM = nameBPM.getDoubleValue(); // El productor original siempre tiene la razón
+            detectedBPM = nameBPM.getDoubleValue();
         }
 
-        // {* LÓGICA DE ETIQUETADO VISUAL Y GUARDADO *}
         int index = filteredAudioFiles.indexOf(file);
 
         if (audioType == "LOOP")
@@ -648,12 +799,12 @@ void MainComponent::analyzeBPM(const juce::File& file)
             if (index >= 0) {
                 filteredBPMs.set(index, bpmString);
                 filteredKeys.set(index, detectedKey);
-                filteredCategories.set(index, audioType); // <-- Pinta
+                filteredCategories.set(index, audioType);
                 fileList.repaintRow(index);
             }
             bpmDatabase.set(filePath, bpmString);
             keyDatabase.set(filePath, detectedKey);
-            categoryDatabase.set(filePath, audioType); // <-- Guarda en RAM
+            categoryDatabase.set(filePath, audioType);
         }
         else
         {
@@ -662,12 +813,12 @@ void MainComponent::analyzeBPM(const juce::File& file)
             if (index >= 0) {
                 filteredBPMs.set(index, "--");
                 filteredKeys.set(index, detectedKey);
-                filteredCategories.set(index, audioType); // <-- Pinta
+                filteredCategories.set(index, audioType);
                 fileList.repaintRow(index);
             }
             bpmDatabase.set(filePath, "--");
             keyDatabase.set(filePath, detectedKey);
-            categoryDatabase.set(filePath, audioType); // <-- Guarda en RAM
+            categoryDatabase.set(filePath, audioType);
         }
         saveDatabase();
     }
@@ -685,35 +836,51 @@ void MainComponent::loadDatabase()
         lastSelectedFolder = xml->getStringAttribute("lastFolder", "C:\\");
         for (auto* child : xml->getChildIterator())
         {
-            juce::String path = child->getStringAttribute("path");
-            juce::String bpm = child->getStringAttribute("bpm");
-            juce::String key = child->getStringAttribute("key", "--");
-            juce::String cat = child->getStringAttribute("category", "--"); // <-- NUEVO
+            if (child->getTagName() == "LEARNED_RULE")
+            {
+                learnedPatternsDatabase.set(child->getStringAttribute("keyword"), child->getStringAttribute("type"));
+            }
+            else if (child->getTagName() == "FILE")
+            {
+                juce::String path = child->getStringAttribute("path");
+                juce::String bpm = child->getStringAttribute("bpm");
+                juce::String key = child->getStringAttribute("key", "--");
+                juce::String cat = child->getStringAttribute("category", "--");
 
-            bpmDatabase.set(path, bpm);
-            keyDatabase.set(path, key);
-            categoryDatabase.set(path, cat); // <-- NUEVO
+                bpmDatabase.set(path, bpm);
+                keyDatabase.set(path, key);
+                categoryDatabase.set(path, cat);
+            }
         }
     }
 }
 
-void MainComponent::saveDatabase()
-{
-    juce::XmlElement xml("BPM_CACHE");
-
-    xml.setAttribute("lastFolder", lastSelectedFolder);
-
-    for (auto path : bpmDatabase.getAllKeys())
+    void MainComponent::saveDatabase()
     {
-        auto* child = xml.createNewChildElement("FILE");
-        child->setAttribute("path", path);
-        child->setAttribute("bpm", bpmDatabase[path]);
-        child->setAttribute("key", keyDatabase[path]);
-        child->setAttribute("category", categoryDatabase[path]); // <-- NUEVO
-    }
+        juce::XmlElement xml("BPM_CACHE");
 
-    xml.writeTo(databaseFile);
-}
+        xml.setAttribute("lastFolder", lastSelectedFolder);
+
+        // Guardamos las reglas que el programa ha aprendido autónomamente
+        for (auto keyword : learnedPatternsDatabase.getAllKeys())
+        {
+            auto* child = xml.createNewChildElement("LEARNED_RULE");
+            child->setAttribute("keyword", keyword);
+            child->setAttribute("type", learnedPatternsDatabase[keyword]);
+        }
+
+        // Guardamos el caché de los archivos individuales
+        for (auto path : bpmDatabase.getAllKeys())
+        {
+            auto* child = xml.createNewChildElement("FILE");
+            child->setAttribute("path", path);
+            child->setAttribute("bpm", bpmDatabase[path]);
+            child->setAttribute("key", keyDatabase[path]);
+            child->setAttribute("category", categoryDatabase[path]);
+        }
+
+        xml.writeTo(databaseFile);
+    }
 
 // {* NUEVO: El actualizador de la pantalla MIDI *}
 void MainComponent::timerCallback()
