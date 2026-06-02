@@ -82,6 +82,11 @@ private:
     juce::StringArray filteredCategories;
     juce::StringPairArray categoryDatabase;
 
+    // {* NUEVO: Memoria y botón para Favoritos *}
+    juce::Array<bool> filteredFavorites;
+    juce::StringPairArray favoritesDatabase;
+    juce::ToggleButton favFilterButton{ "Favs" };
+
     // {* NUEVO CÓDIGO: Arreglos paralelos y extractores *}
     juce::StringArray filteredBPMs;
     juce::StringArray filteredKeys; // <-- Para guardar la tonalidad

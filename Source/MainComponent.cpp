@@ -131,6 +131,11 @@ MainComponent::MainComponent()
     headerCategory.setColour(juce::Label::textColourId, juce::Colour(0xff6b7280));
     headerCategory.setJustificationType(juce::Justification::centred);
 
+    // {* NUEVO: Botón interactivo de Favoritos *}
+    addAndMakeVisible(favFilterButton);
+    favFilterButton.setColour(juce::ToggleButton::textColourId, juce::Colour(0xffe5c07b)); // Color Dorado Premium
+    favFilterButton.onClick = [this] { applyFilters(); };
+
     addAndMakeVisible(waveformDisplay);
     addAndMakeVisible(transportControls);
 
@@ -234,11 +239,12 @@ void MainComponent::resized()
     int badgeWidth = 240;
 
     // Matemáticas corregidas para el nuevo menú:
-    searchBar.setBounds(315, topMargin, 140, 26);
-    categoryBox.setBounds(465, topMargin, 130, 26); // <-- Nuevo filtro
-    typeBox.setBounds(605, topMargin, 110, 26);
-    bpmBox.setBounds(725, topMargin, 70, 26);
-    keyBox.setBounds(805, topMargin, 130, 26);
+    favFilterButton.setBounds(315, topMargin, 60, 26); // ¡Fuera del panel izquierdo!
+    searchBar.setBounds(380, topMargin, 120, 26);
+    categoryBox.setBounds(505, topMargin, 125, 26);
+    typeBox.setBounds(635, topMargin, 95, 26);
+    bpmBox.setBounds(735, topMargin, 60, 26);
+    keyBox.setBounds(800, topMargin, 120, 26);
 
     bpmDisplayLabel.setBounds(getWidth() - badgeWidth - 15, topMargin, badgeWidth, 26);
 
@@ -311,10 +317,22 @@ void MainComponent::paintListBoxItem(int rowNumber, juce::Graphics& g, int width
 
     if (rowNumber < filteredAudioFiles.size())
     {
-        // 1. DIBUJAMOS EL NOMBRE
+        // 0. DIBUJAMOS LA ESTRELLA DE FAVORITO (Con más margen izquierdo)
+        bool isFav = filteredFavorites[rowNumber];
+        g.setColour(isFav ? juce::Colour(0xffe5c07b) : juce::Colour(0xff5c6370));
+        g.setFont(16.0f);
+        juce::String solidStar = juce::String::fromUTF8("\xe2\x98\x85");
+        juce::String hollowStar = juce::String::fromUTF8("\xe2\x98\x86");
+
+        // La movemos al pixel X = 15 para que no se esconda
+        g.drawText(isFav ? solidStar : hollowStar, 15, 0, 30, height, juce::Justification::centred, true);
+
+        // 1. DIBUJAMOS EL NOMBRE (Empujado a la derecha para no chocar)
         g.setColour(juce::Colour(0xffabb2bf));
         g.setFont(14.0f);
-        g.drawText(filteredAudioFiles[rowNumber].getFileName(), 15, 0, width - 240, height, juce::Justification::centredLeft, true);
+
+        // Lo movemos al pixel X = 50 y ajustamos su límite derecho
+        g.drawText(filteredAudioFiles[rowNumber].getFileName(), 50, 0, width - 280, height, juce::Justification::centredLeft, true);
 
         // 2. DIBUJAMOS LA CATEGORÍA (Loop / One Shot)
         g.setColour(juce::Colour(0xffc678dd)); // Moradito premium sutil
@@ -338,6 +356,23 @@ void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
 
     juce::File selectedAudioFile = filteredAudioFiles[row];
     juce::String filePath = selectedAudioFile.getFullPathName();
+
+    // {* NUEVO: DETECTAR CLIC IZQUIERDO EXACTO EN LA ESTRELLA *}
+    if (e.x < 30 && !e.mods.isPopupMenu())
+    {
+        bool currentlyFav = (favoritesDatabase[filePath] == "1");
+        juce::String newState = currentlyFav ? "0" : "1";
+
+        favoritesDatabase.set(filePath, newState);
+        filteredFavorites.set(row, !currentlyFav);
+        saveDatabase();
+
+        // Si el botón "Favs" está presionado y le quitas la estrella a uno, desaparece de la vista al instante
+        if (favFilterButton.getToggleState()) applyFilters();
+        else fileList.repaintRow(row);
+
+        return; // Salimos de la función para que el audio no se reproduzca solo por marcar la estrella
+    }
 
     // {* SI EL USUARIO HACE CLIC DERECHO (OVERRIDE MANUAL) *}
     if (e.mods.isPopupMenu())
@@ -598,7 +633,10 @@ void MainComponent::applyFilters()
     filteredAudioFiles.clear();
     filteredBPMs.clear();
     filteredKeys.clear();
-    filteredCategories.clear(); // <-- Faltaba limpiar la memoria visual aquí
+    filteredCategories.clear();
+    filteredFavorites.clear(); // Limpiamos la memoria de estrellas
+
+    bool showOnlyFavorites = favFilterButton.getToggleState();
 
     juce::String searchText = searchBar.getText().toLowerCase();
     juce::String bpmText = bpmBox.getText().toLowerCase();
@@ -657,6 +695,10 @@ void MainComponent::applyFilters()
 
         if (isMidi) currentCat = "MIDI";
 
+        // {* NUEVO: EL ESCUDO DEL FILTRO DE ESTRELLA *}
+        bool isFav = (favoritesDatabase[filePath] == "1");
+        if (showOnlyFavorites && !isFav) continue; // Si el botón está presionado y no es favorito, se salta este sample
+
         bool matchesType = true;
         if (typeFilter == 2 && isMidi) matchesType = false;
         if (typeFilter == 3 && !isMidi) matchesType = false;
@@ -684,7 +726,8 @@ void MainComponent::applyFilters()
         if (matchesText && matchesBpm && matchesKey && matchesType && matchesCat)
         {
             filteredAudioFiles.add(file);
-            filteredCategories.add(currentCat); // Añadimos a la tabla visual
+            filteredCategories.add(currentCat);
+            filteredFavorites.add(isFav);       // Sincronizamos la estrella visual
 
             if (bpmDatabase.containsKey(filePath)) {
                 filteredBPMs.add(bpmDatabase[filePath]);
@@ -973,10 +1016,12 @@ void MainComponent::loadDatabase()
                 juce::String bpm = child->getStringAttribute("bpm");
                 juce::String key = child->getStringAttribute("key", "--");
                 juce::String cat = child->getStringAttribute("category", "--");
+                juce::String fav = child->getStringAttribute("fav", "0"); // Carga si es favorito
 
                 bpmDatabase.set(path, bpm);
                 keyDatabase.set(path, key);
                 categoryDatabase.set(path, cat);
+                favoritesDatabase.set(path, fav); // Guarda en RAM
             }
         }
     }
