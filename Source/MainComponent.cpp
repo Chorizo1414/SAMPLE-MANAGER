@@ -239,22 +239,22 @@ MainComponent::MainComponent()
     // {* NUEVO: Configuramos el botón de Audio *}
     addAndMakeVisible(settingsButton);
     settingsButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2c313a));
-    settingsButton.setButtonText("Configuración y análisis");
+    settingsButton.setButtonText(juce::String::fromUTF8("Configuraci\303\263n y an\303\241lisis"));
     addAndMakeVisible(batchStatusLabel);
     batchStatusLabel.setColour(juce::Label::textColourId, juce::Colour(0xff56b6c2));
     batchStatusLabel.setJustificationType(juce::Justification::centredLeft);
     batchStatusLabel.setFont(juce::Font(12.0f));
-    batchStatusLabel.setText("Análisis: disponible desde Configuración", juce::dontSendNotification);
+    batchStatusLabel.setText(juce::String::fromUTF8("An\303\241lisis: disponible desde Configuraci\303\263n"), juce::dontSendNotification);
 
     settingsButton.onClick = [this]
     {
         juce::PopupMenu menu;
-        menu.addItem(1, "Configuración de audio...");
+        menu.addItem(1, juce::String::fromUTF8("Configuraci\303\263n de audio..."));
         menu.addSeparator();
-        menu.addItem(2, "Analizar carpeta raíz y todas sus subcarpetas", !batchRunning);
+        menu.addItem(2, juce::String::fromUTF8("Analizar carpeta ra\303\255z y todas sus subcarpetas"), !batchRunning);
         menu.addItem(3, batchControl && batchControl->paused.load()
-                            ? "Reanudar análisis" : "Pausar análisis", batchRunning);
-        menu.addItem(4, "Cancelar análisis", batchRunning);
+                            ? juce::String::fromUTF8("Reanudar an\303\241lisis") : juce::String::fromUTF8("Pausar an\303\241lisis"), batchRunning);
+        menu.addItem(4, juce::String::fromUTF8("Cancelar an\303\241lisis"), batchRunning);
 
         juce::Component::SafePointer<MainComponent> safeThis(this);
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&settingsButton),
@@ -270,7 +270,7 @@ MainComponent::MainComponent()
 
                 juce::DialogWindow::LaunchOptions options;
                 options.content.setOwned(audioSettings);
-                options.dialogTitle = "Configuración de Audio";
+                options.dialogTitle = juce::String::fromUTF8("Configuraci\303\263n de Audio");
                 options.dialogBackgroundColour = juce::Colour(0xff181a1f);
                 options.escapeKeyTriggersCloseButton = true;
                 options.useNativeTitleBar = true;
@@ -1179,14 +1179,14 @@ void MainComponent::startBatchAnalysis()
     if (lastSelectedFolder.isEmpty())
     {
         juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
-            "Análisis de librerías", "Primero selecciona una carpeta raíz válida.");
+            juce::String::fromUTF8("An\303\241lisis de librer\303\255as"), juce::String::fromUTF8("Primero selecciona una carpeta ra\303\255z v\303\241lida."));
         return;
     }
     const juce::File root(lastSelectedFolder);
     if (!root.isDirectory())
     {
         juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
-            "Análisis de librerías", "La carpeta raíz ya no existe.");
+            juce::String::fromUTF8("An\303\241lisis de librer\303\255as"), juce::String::fromUTF8("La carpeta ra\303\255z ya no existe."));
         return;
     }
 
@@ -1289,7 +1289,7 @@ void MainComponent::startBatchAnalysis()
 
         if (!stopped())
         {
-            report("Análisis: 0 / " + juce::String(total) + " archivos");
+            report(juce::String::fromUTF8("An\303\241lisis: 0 / ") + juce::String(total) + " archivos");
             std::unordered_set<std::string> known;
             known.reserve(static_cast<size_t>(analyzedPaths.size()) + 64);
             for (const auto& path : analyzedPaths)
@@ -1323,7 +1323,7 @@ void MainComponent::startBatchAnalysis()
 
                 if (now - lastReport >= 850)
                 {
-                    report("Análisis: " + juce::String(done) + "/" + juce::String(total)
+                    report(juce::String::fromUTF8("An\303\241lisis: ") + juce::String(done) + "/" + juce::String(total)
                            + " (" + juce::String(total > 0 ? (done * 100 / total) : 100)
                            + "%) | Nuevos: " + juce::String(analyzed));
                     lastReport = now;
@@ -1358,15 +1358,15 @@ void MainComponent::pauseOrResumeBatchAnalysis()
     if (!batchRunning || !batchControl || batchControl->cancelRequested.load()) return;
     const bool paused = !batchControl->paused.load();
     batchControl->paused.store(paused);
-    batchStatusLabel.setText(paused ? "Análisis pausado (Config. para reanudar)"
-                                    : "Análisis reanudado...", juce::dontSendNotification);
+    batchStatusLabel.setText(paused ? juce::String::fromUTF8("An\303\241lisis pausado (Config. para reanudar)")
+                                    : juce::String::fromUTF8("An\303\241lisis reanudado..."), juce::dontSendNotification);
 }
 
 void MainComponent::cancelBatchAnalysis()
 {
     if (!batchRunning || !batchControl) return;
     batchControl->cancelRequested.store(true);
-    batchStatusLabel.setText("Cancelando... se guardarán los archivos terminados.",
+    batchStatusLabel.setText(juce::String::fromUTF8("Cancelando... se guardar\303\241n los archivos terminados."),
                              juce::dontSendNotification);
 }
 
