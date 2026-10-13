@@ -1,4 +1,219 @@
 #include "MainComponent.h"
+#include <functional>
+#include <memory>
+#include <utility>
+#include <unordered_set>
+#include <vector>
+
+namespace
+{
+class BackgroundTask final : public juce::ThreadPoolJob
+{
+public:
+    BackgroundTask(const juce::String& name, std::function<void(BackgroundTask&)> action)
+        : juce::ThreadPoolJob(name), work(std::move(action)) {}
+
+    JobStatus runJob() override
+    {
+        work(*this);
+        return jobHasFinished;
+    }
+
+private:
+    std::function<void(BackgroundTask&)> work;
+};
+
+struct AudioAnalysisResult
+{
+    bool valid = false;
+    juce::String bpm, key, category;
+};
+
+struct BatchCompletedResult
+{
+    juce::File file;
+    AudioAnalysisResult analysis;
+};
+
+AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::File& file,
+                                             const juce::StringPairArray& learnedPatterns,
+                                             const juce::String& nameBPM,
+                                             const std::shared_ptr<SampleBatchControl>& batch = nullptr)
+{
+    AudioAnalysisResult result;
+    juce::AudioFormatManager formatManager;
+    formatManager.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
+    if (reader == nullptr)
+        return result;
+        double durationInSeconds = (double)reader->lengthInSamples / (double)reader->sampleRate;
+
+        BTrack bpmDetector;
+        KeyDetector keyDetector(reader->sampleRate);
+
+        int maxSeconds = 60;
+        juce::int64 numSamplesToRead = juce::jmin(reader->lengthInSamples, (juce::int64)(reader->sampleRate * maxSeconds));
+
+        int hopSize = 512;
+        juce::AudioBuffer<float> buffer(reader->numChannels, hopSize);
+        juce::HeapBlock<double> monoFrame(hopSize);
+        juce::int64 samplesRead = 0;
+
+        int peakCount = 0;
+        int cooldownSamples = 0;
+        const int cooldownThreshold = (int)(reader->sampleRate * 0.15);
+        double runningAverage = 0.0;
+
+        while (samplesRead < numSamplesToRead)
+        {
+            if (job.shouldExit() || (batch && batch->cancelRequested.load())) return result;
+
+            // El análisis masivo cede el procesador durante reproducciones y pausas.
+            if (batch && (samplesRead / hopSize) % 16 == 0)
+            {
+                while ((batch->paused.load() || batch->playbackActive.load())
+                       && !batch->cancelRequested.load() && !job.shouldExit())
+                    juce::Thread::sleep(40);
+
+                if (job.shouldExit() || batch->cancelRequested.load()) return result;
+            }
+
+            int samplesToGet = (int)juce::jmin((juce::int64)hopSize, numSamplesToRead - samplesRead);
+            buffer.clear();
+            reader->read(&buffer, 0, samplesToGet, samplesRead, true, true);
+
+            for (int i = 0; i < hopSize; ++i)
+            {
+                if (i < samplesToGet)
+                {
+                    float sum = 0.0f;
+                    for (int ch = 0; ch < reader->numChannels; ++ch)
+                        sum += buffer.getReadPointer(ch)[i];
+
+                    monoFrame[i] = (double)(sum / reader->numChannels);
+
+                    double absSample = std::abs(monoFrame[i]);
+                    runningAverage = 0.999 * runningAverage + 0.001 * absSample;
+
+                    if (cooldownSamples > 0) cooldownSamples--;
+
+                    if (absSample > runningAverage * 3.0 && absSample > 0.05 && cooldownSamples == 0)
+                    {
+                        peakCount++;
+                        cooldownSamples = cooldownThreshold;
+                    }
+                }
+                else { monoFrame[i] = 0.0; }
+            }
+
+            bpmDetector.processAudioFrame(monoFrame.getData());
+            keyDetector.processAudioFrame(monoFrame.getData(), samplesToGet);
+            // Cedemos CPU a la reproducción y a la UI durante análisis largos.
+            if ((samplesRead / hopSize) % 16 == 0) juce::Thread::sleep(3);
+            samplesRead += samplesToGet;
+        }
+
+        double detectedBPM = bpmDetector.getCurrentTempoEstimate();
+        juce::String detectedKey = keyDetector.getDetectedKey();
+
+        juce::String fileNameLower = file.getFileName().toLowerCase();
+        juce::String audioType;
+        juce::String parentFolder = file.getParentDirectory().getFileName().toLowerCase();
+
+        bool learnedTypeFound = false;
+        for (auto& keyword : learnedPatterns.getAllKeys())
+        {
+            if (parentFolder.contains(keyword.toLowerCase()))
+            {
+                audioType = learnedPatterns[keyword];
+                learnedTypeFound = true;
+                if (audioType == "ONE SHOT" || audioType == "SAMPLE") detectedBPM = 0.0;
+                break;
+            }
+        }
+
+        bool isExplicitLoop = false;
+        bool isExplicitOneShot = false;
+
+        if (!learnedTypeFound)
+        {
+            isExplicitLoop = fileNameLower.contains("loop") || fileNameLower.contains("bpm") ||
+                parentFolder.contains("loop") || parentFolder.contains("melody");
+
+            isExplicitOneShot = fileNameLower.contains("oneshot") || fileNameLower.contains("one shot") ||
+                fileNameLower.contains("fx") || fileNameLower.contains("impact") ||
+                fileNameLower.contains("crash") || fileNameLower.contains("riser") ||
+                fileNameLower.contains("sweep") || fileNameLower.contains("cymbal") ||
+                fileNameLower.contains("kick") || fileNameLower.contains("snare") ||
+                fileNameLower.contains("clap") || fileNameLower.contains("hat") ||
+                fileNameLower.contains("808") || fileNameLower.contains("shaker") ||
+                fileNameLower.contains("perc") || fileNameLower.contains("tom") ||
+                fileNameLower.contains("vocal") || fileNameLower.contains("chant") ||
+                fileNameLower.contains("fill") ||
+                parentFolder.contains("oneshot") || parentFolder.contains("one shot") ||
+                parentFolder.contains("drum") || parentFolder.contains("fx") ||
+                parentFolder.contains("kick") || parentFolder.contains("snare") ||
+                parentFolder.contains("hat") || parentFolder.contains("perc") ||
+                parentFolder.contains("cymbal");
+        }
+
+        if (learnedTypeFound)
+        {
+            // audioType ya se definió por la base de datos de aprendizaje
+        }
+        else if (isExplicitOneShot)
+        {
+            audioType = "ONE SHOT";
+            detectedBPM = 0.0;
+        }
+        else if (isExplicitLoop)
+        {
+            audioType = "LOOP";
+        }
+        else
+        {
+            if (durationInSeconds <= 3.5)
+            {
+                audioType = "ONE SHOT";
+                detectedBPM = 0.0;
+            }
+            else if (detectedBPM > 0.0 && peakCount >= 4)
+            {
+                audioType = "LOOP";
+            }
+            else if (peakCount < 4)
+            {
+                audioType = "ONE SHOT";
+                detectedBPM = 0.0;
+            }
+            else
+            {
+                audioType = "SAMPLE";
+            }
+        }
+
+        // El trabajador de lote calcula el BPM del nombre sin acceder a MainComponent.
+        juce::String inferredBPM = nameBPM;
+        if (inferredBPM.isEmpty())
+        {
+            static const std::regex bpmPattern("([0-9]{2,3})\\s*bp");
+            std::smatch match;
+            const std::string lowercaseName = file.getFileName().toLowerCase().toStdString();
+            inferredBPM = std::regex_search(lowercaseName, match, bpmPattern)
+                              ? juce::String(match[1].str()) : "--";
+        }
+        if (inferredBPM != "--" && audioType == "LOOP")
+            detectedBPM = inferredBPM.getDoubleValue();
+
+
+    result.valid = true;
+    result.bpm = audioType == "LOOP" ? juce::String((int)std::round(detectedBPM)) : "--";
+    result.key = detectedKey;
+    result.category = audioType;
+    return result;
+}
+} // namespace
+
 
 //==============================================================================
 MainComponent::MainComponent()
@@ -24,20 +239,49 @@ MainComponent::MainComponent()
     // {* NUEVO: Configuramos el botón de Audio *}
     addAndMakeVisible(settingsButton);
     settingsButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2c313a));
-    settingsButton.onClick = [this] {
-        // Invocamos el panel nativo de JUCE para tarjetas de sonido
-        auto* audioSettings = new juce::AudioDeviceSelectorComponent(deviceManager, 0, 0, 0, 2, false, false, true, false);
-        audioSettings->setSize(500, 400);
+    settingsButton.setButtonText(juce::String::fromUTF8("Configuraci\303\263n y an\303\241lisis"));
+    addAndMakeVisible(batchStatusLabel);
+    batchStatusLabel.setColour(juce::Label::textColourId, juce::Colour(0xff56b6c2));
+    batchStatusLabel.setJustificationType(juce::Justification::centredLeft);
+    batchStatusLabel.setFont(juce::Font(12.0f));
+    batchStatusLabel.setText(juce::String::fromUTF8("An\303\241lisis: disponible desde Configuraci\303\263n"), juce::dontSendNotification);
 
-        juce::DialogWindow::LaunchOptions options;
-        options.content.setOwned(audioSettings);
-        options.dialogTitle = "Configuracion de Audio";
-        options.dialogBackgroundColour = juce::Colour(0xff181a1f);
-        options.escapeKeyTriggersCloseButton = true;
-        options.useNativeTitleBar = true;
-        options.resizable = false;
-        options.launchAsync();
-        };
+    settingsButton.onClick = [this]
+    {
+        juce::PopupMenu menu;
+        menu.addItem(1, juce::String::fromUTF8("Configuraci\303\263n de audio..."));
+        menu.addSeparator();
+        menu.addItem(2, juce::String::fromUTF8("Analizar carpeta ra\303\255z y todas sus subcarpetas"), !batchRunning);
+        menu.addItem(3, batchControl && batchControl->paused.load()
+                            ? juce::String::fromUTF8("Reanudar an\303\241lisis") : juce::String::fromUTF8("Pausar an\303\241lisis"), batchRunning);
+        menu.addItem(4, juce::String::fromUTF8("Cancelar an\303\241lisis"), batchRunning);
+
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&settingsButton),
+            [safeThis](int choice)
+        {
+            if (safeThis == nullptr) return;
+
+            if (choice == 1)
+            {
+                auto* audioSettings = new juce::AudioDeviceSelectorComponent(
+                    safeThis->deviceManager, 0, 0, 0, 2, false, false, true, false);
+                audioSettings->setSize(500, 400);
+
+                juce::DialogWindow::LaunchOptions options;
+                options.content.setOwned(audioSettings);
+                options.dialogTitle = juce::String::fromUTF8("Configuraci\303\263n de Audio");
+                options.dialogBackgroundColour = juce::Colour(0xff181a1f);
+                options.escapeKeyTriggersCloseButton = true;
+                options.useNativeTitleBar = true;
+                options.resizable = false;
+                options.launchAsync();
+            }
+            else if (choice == 2) safeThis->startBatchAnalysis();
+            else if (choice == 3) safeThis->pauseOrResumeBatchAnalysis();
+            else if (choice == 4) safeThis->cancelBatchAnalysis();
+        });
+    };
 
     // {* NUEVO: Botón para elegir la carpeta de samples *}
     addAndMakeVisible(chooseFolderButton);
@@ -55,6 +299,9 @@ MainComponent::MainComponent()
                     juce::File chosenFolder = fc.getResult();
                     if (chosenFolder.isDirectory())
                     {
+                        // Cambiar la raíz detiene el lote anterior sin descartar análisis completados.
+                        if (batchRunning && chosenFolder.getFullPathName() != lastSelectedFolder)
+                            cancelBatchAnalysis();
                         // Guardamos la nueva raíz
                         lastSelectedFolder = chosenFolder.getFullPathName();
                         saveDatabase();
@@ -134,7 +381,7 @@ MainComponent::MainComponent()
     // {* NUEVO: Botón interactivo de Favoritos *}
     addAndMakeVisible(favFilterButton);
     favFilterButton.setColour(juce::ToggleButton::textColourId, juce::Colour(0xffe5c07b)); // Color Dorado Premium
-    favFilterButton.onClick = [this] { applyFilters(); };
+    favFilterButton.onClick = [this] { updateFavoriteView(); };
 
     addAndMakeVisible(waveformDisplay);
     addAndMakeVisible(transportControls);
@@ -161,13 +408,7 @@ MainComponent::MainComponent()
         {
             int randomIndex = juce::Random::getSystemRandom().nextInt(filteredAudioFiles.size());
             fileList.selectRow(randomIndex, false, true);
-
-            juce::File selectedAudioFile = filteredAudioFiles[randomIndex];
-            waveformDisplay.setAudioFile(selectedAudioFile);
-            
-            // Ya no hay código espagueti, le decimos al motor que cargue y toque
-            audioPlayer.loadFile(selectedAudioFile);
-            audioPlayer.play();
+            previewAudio(filteredAudioFiles[randomIndex]);
         }
     };
 
@@ -186,6 +427,13 @@ MainComponent::~MainComponent()
 {
     juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
 
+    if (batchControl) batchControl->cancelRequested.store(true);
+    batchPool.removeAllJobs(true, 10000);
+    scanPool.removeAllJobs(true, 10000);
+    analysisPool.removeAllJobs(true, 10000);
+    // Al cerrar no se pierden cambios que seguían pendientes en memoria.
+    if (databaseSavePending) flushDatabaseSave();
+    databaseWritePool.removeAllJobs(false, 30000);
     shutdownAudio();
     directoryThread.stopThread(1000);
 }
@@ -232,7 +480,8 @@ void MainComponent::resized()
     chooseFolderButton.setBounds(0, 0, 300, 30);
 
     // 2. El árbol de carpetas en medio
-    directoryTree.setBounds(0, 30, 300, getHeight() - 30 - 45);
+    directoryTree.setBounds(0, 30, 300, getHeight() - 30 - 72);
+    batchStatusLabel.setBounds(10, getHeight() - 65, 280, 24);
     settingsButton.setBounds(10, getHeight() - 35, 280, 26);
 
     int topMargin = 15;
@@ -264,33 +513,46 @@ void MainComponent::resized()
 
 void MainComponent::selectionChanged()
 {
+    const juce::File selectedFolder = directoryTree.getSelectedFile();
+    ++scanGeneration;
+    scanPool.removeAllJobs(true, 0);
     audioFilesInFolder.clear();
-    filteredAudioFiles.clear();
-    juce::File selectedFolder = directoryTree.getSelectedFile();
+    applyFilters(); // Limpiamos la vista anterior sin borrar los filtros.
 
-    if (selectedFolder.isDirectory())
+    if (!selectedFolder.isDirectory()) return;
+
+    const int generation = scanGeneration;
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    scanPool.addJob(new BackgroundTask("Scan sample folders", [selectedFolder, generation, safeThis](BackgroundTask& job)
     {
+        juce::Array<juce::File> found;
+        juce::Array<juce::File> pending;
+        pending.add(selectedFolder);
 
-        std::function<void(const juce::File&)> searchSubfolders = [&](const juce::File& folderToSearch)
+        while (!pending.isEmpty() && !job.shouldExit())
         {
-            // Le agregamos ;*.mid al final de la lista
-            juce::Array<juce::File> filesFound = folderToSearch.findChildFiles(juce::File::findFiles, false, "*.wav;*.mp3;*.aif;*.mid");
-            audioFilesInFolder.addArray(filesFound);
+            const juce::File folder = pending.removeAndReturn(pending.size() - 1);
+            juce::DirectoryIterator iterator(folder, false, "*", juce::File::findFilesAndDirectories);
 
-            juce::Array<juce::File> subfoldersFound = folderToSearch.findChildFiles(juce::File::findDirectories, false);
-            for (auto& subfolder : subfoldersFound)
+            while (iterator.next())
             {
-                searchSubfolders(subfolder);
+                if (job.shouldExit()) return;
+                const juce::File child = iterator.getFile();
+                if (child.isDirectory())
+                    pending.add(child);
+                else if (child.hasFileExtension(".wav;.mp3;.aif;.mid"))
+                    found.add(child);
             }
-        };
+        }
 
-        searchSubfolders(selectedFolder);
-        filteredAudioFiles = audioFilesInFolder;
-        applyFilters();
-    }
-
-    searchBar.setText("", juce::dontSendNotification);
-    fileList.updateContent();
+        if (job.shouldExit()) return;
+        juce::MessageManager::callAsync([safeThis, generation, found = std::move(found)]() mutable
+        {
+            if (safeThis == nullptr || safeThis->scanGeneration != generation) return;
+            safeThis->audioFilesInFolder = std::move(found);
+            safeThis->applyFilters();
+        });
+    }), true);
 }
 
 int MainComponent::getNumRows() 
@@ -320,19 +582,19 @@ void MainComponent::paintListBoxItem(int rowNumber, juce::Graphics& g, int width
         // 0. DIBUJAMOS LA ESTRELLA DE FAVORITO (Con más margen izquierdo)
         bool isFav = filteredFavorites[rowNumber];
         g.setColour(isFav ? juce::Colour(0xffe5c07b) : juce::Colour(0xff5c6370));
-        g.setFont(16.0f);
+        g.setFont(22.0f);
         juce::String solidStar = juce::String::fromUTF8("\xe2\x98\x85");
         juce::String hollowStar = juce::String::fromUTF8("\xe2\x98\x86");
 
         // La movemos al pixel X = 15 para que no se esconda
-        g.drawText(isFav ? solidStar : hollowStar, 15, 0, 30, height, juce::Justification::centred, true);
+        g.drawText(isFav ? solidStar : hollowStar, 10, 0, 38, height, juce::Justification::centred, true);
 
         // 1. DIBUJAMOS EL NOMBRE (Empujado a la derecha para no chocar)
         g.setColour(juce::Colour(0xffabb2bf));
         g.setFont(14.0f);
 
         // Lo movemos al pixel X = 50 y ajustamos su límite derecho
-        g.drawText(filteredAudioFiles[rowNumber].getFileName(), 50, 0, width - 280, height, juce::Justification::centredLeft, true);
+        g.drawText(filteredAudioFiles[rowNumber].getFileName(), 54, 0, width - 284, height, juce::Justification::centredLeft, true);
 
         // 2. DIBUJAMOS LA CATEGORÍA (Loop / One Shot)
         g.setColour(juce::Colour(0xffc678dd)); // Moradito premium sutil
@@ -358,17 +620,18 @@ void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
     juce::String filePath = selectedAudioFile.getFullPathName();
 
     // {* NUEVO: DETECTAR CLIC IZQUIERDO EXACTO EN LA ESTRELLA *}
-    if (e.x < 30 && !e.mods.isPopupMenu())
+    if (e.x < 48 && !e.mods.isPopupMenu())
     {
-        bool currentlyFav = (favoritesDatabase[filePath] == "1");
+        bool currentlyFav = favoritesLookup[filePath];
         juce::String newState = currentlyFav ? "0" : "1";
 
         favoritesDatabase.set(filePath, newState);
+        favoritesLookup.set(filePath, !currentlyFav);
         filteredFavorites.set(row, !currentlyFav);
-        saveDatabase();
+        saveDatabase(); // Guardado diferido; el clic jamás espera al disco.
 
         // Si el botón "Favs" está presionado y le quitas la estrella a uno, desaparece de la vista al instante
-        if (favFilterButton.getToggleState()) applyFilters();
+        if (favFilterButton.getToggleState()) updateFavoriteView();
         else fileList.repaintRow(row);
 
         return; // Salimos de la función para que el audio no se reproduzca solo por marcar la estrella
@@ -397,11 +660,13 @@ void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
                     // 1. Corregimos los datos visuales en tiempo real
                     filteredCategories.set(row, newType);
                     categoryDatabase.set(filePath, newType);
+                    categoryLookup.set(filePath, newType);
 
                     if (newType != "LOOP")
                     {
                         filteredBPMs.set(row, "--");
                         bpmDatabase.set(filePath, "--");
+                        bpmLookup.set(filePath, "--");
                     }
 
                     // 2. ¡SISTEMA DE APRENDIZAJE AUTÓNOMO!
@@ -439,7 +704,9 @@ void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
 
                                     // Actualizamos la base de datos maestra
                                     bpmDatabase.set(filePath, bpmString);
+                                    bpmLookup.set(filePath, bpmString);
                                     categoryDatabase.set(filePath, "LOOP");
+                                    categoryLookup.set(filePath, "LOOP");
 
                                     // Refrescamos TODA la UI y guardamos en el XML para que el cambio se vea al instante
                                     saveDatabase();
@@ -457,23 +724,42 @@ void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
     {
         if (fileList.getSelectedRow() == row)
         {
-            audioPlayer.loadFile(selectedAudioFile);
-            audioPlayer.play();
+            previewAudio(selectedAudioFile);
         }
     }
 }
 
+void MainComponent::previewAudio(const juce::File& file)
+{
+    // Cancelar análisis anterior de forma no bloqueante. La reproducción tiene prioridad.
+    pendingAnalysisFile = juce::File();
+    analysisPool.removeAllJobs(true, 0);
+
+    previewPauseUntil = juce::Time::getMillisecondCounter() + 800;
+    if (batchControl) batchControl->playbackActive.store(true);
+    waveformDisplay.setAudioFile(file);
+    audioPlayer.loadFile(file);
+    audioPlayer.play();
+
+    if (file.hasFileExtension(".mid") || bpmLookup.contains(file.getFullPathName()))
+    {
+        analyzeBPM(file);
+        return;
+    }
+
+    bpmDisplayLabel.setText("Analizando audio...", juce::dontSendNotification);
+    pendingAnalysisFile = file;
+    pendingAnalysisRequestedAt = juce::Time::getMillisecondCounter();
+}
+
 void MainComponent::selectedRowsChanged(int lastRowSelected)
 {
-    if (lastRowSelected >= 0 && lastRowSelected < filteredAudioFiles.size())
-    {
-        juce::File selectedAudioFile = filteredAudioFiles[lastRowSelected];
-        waveformDisplay.setAudioFile(selectedAudioFile);
-        analyzeBPM(selectedAudioFile);
+    // ListBox dispara esta notificación ANTES del clic: una estrella no debe iniciar audio/análisis.
+    if (juce::ModifierKeys::getCurrentModifiersRealtime().isAnyMouseButtonDown())
+        return;
 
-        audioPlayer.loadFile(selectedAudioFile);
-        audioPlayer.play();
-    }
+    if (lastRowSelected >= 0 && lastRowSelected < filteredAudioFiles.size())
+        previewAudio(filteredAudioFiles[lastRowSelected]);
 }
 
 void MainComponent::mouseDrag(const juce::MouseEvent& e)
@@ -620,55 +906,70 @@ void MainComponent::mouseDrag(const juce::MouseEvent& e)
 
 void MainComponent::textEditorTextChanged(juce::TextEditor& editor)
 {
-    applyFilters();
+    // Evita recalcular miles de resultados por cada pulsación rápida.
+    juce::ignoreUnused(editor);
+    filterInputPending = true;
+    lastFilterInputTime = juce::Time::getMillisecondCounter();
 }
 
 void MainComponent::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
 {
+    juce::ignoreUnused(comboBoxThatHasChanged);
+    filterInputPending = false;
     applyFilters();
 }
 
 void MainComponent::applyFilters()
 {
-    filteredAudioFiles.clear();
-    filteredBPMs.clear();
-    filteredKeys.clear();
-    filteredCategories.clear();
-    filteredFavorites.clear(); // Limpiamos la memoria de estrellas
-
-    bool showOnlyFavorites = favFilterButton.getToggleState();
-
-    juce::String searchText = searchBar.getText().toLowerCase();
-    juce::String bpmText = bpmBox.getText().toLowerCase();
-
-    bool isAllKeys = (keyBox.getSelectedId() == 1);
-    juce::String selectedKey = isAllKeys ? "" : keyBox.getText().toLowerCase();
-
-    juce::String note = "";
-    juce::String scale = "";
+    matchingAudioFiles.clear();
+    matchingBPMs.clear();
+    matchingKeys.clear();
+    matchingCategories.clear();
+    const juce::String searchText = searchBar.getText().toLowerCase();
+    const juce::String bpmText = bpmBox.getText().toLowerCase();
+    const bool isAllKeys = keyBox.getSelectedId() == 1;
+    const juce::String selectedKey = isAllKeys ? "" : keyBox.getText().toLowerCase();
+    juce::String note, scale;
     if (!isAllKeys)
     {
         note = selectedKey.upToFirstOccurrenceOf(" ", false, false).trim();
         scale = selectedKey.fromFirstOccurrenceOf(" ", false, false).trim();
     }
 
-    int typeFilter = typeBox.getSelectedId();
-    int catFilter = categoryBox.getSelectedId(); // 1:Todos, 2:Loops, 3:OneShots, 4:Samples
+    // Se calculan una sola vez por búsqueda, no por cada archivo.
+    const juce::String key1 = note + " " + scale;
+    const juce::String key2 = note + scale;
+    const juce::String key3 = note + "_" + scale;
+    const juce::String key4 = note + "-" + scale;
+    const auto learnedKeywords = learnedPatternsDatabase.getAllKeys();
+    const int typeFilter = typeBox.getSelectedId();
+    const int catFilter = categoryBox.getSelectedId();
 
-    for (auto& file : audioFilesInFolder)
+    for (const auto& file : audioFilesInFolder)
     {
-        juce::String fileName = file.getFileName().toLowerCase();
-        bool isMidi = file.hasFileExtension(".mid");
-        juce::String filePath = file.getFullPathName();
+        const juce::String fileName = file.getFileName().toLowerCase();
+
+        // Filtros baratos primero: descartamos archivos no coincidentes antes de clasificarlos.
+        if (searchText.isNotEmpty() && !fileName.contains(searchText)) continue;
+        if (bpmText.isNotEmpty() && !fileName.contains(bpmText)) continue;
+        if (!isAllKeys && !fileName.contains(key1) && !fileName.contains(key2)
+            && !fileName.contains(key3) && !fileName.contains(key4)) continue;
+
+        const bool isMidi = file.hasFileExtension(".mid");
+        if (typeFilter == 2 && isMidi) continue;
+        if (typeFilter == 3 && !isMidi) continue;
+
+        const juce::String filePath = file.getFullPathName();
+        // El filtro Favs se aplica después sobre una vista ya calculada.
 
         // Extraemos la categoría
-        juce::String currentCat = categoryDatabase.containsKey(filePath) ? categoryDatabase[filePath] : "--";
+        juce::String currentCat = categoryLookup.contains(filePath) ? categoryLookup[filePath] : "--";
         if (currentCat == "--" && !isMidi)
         {
             juce::String parentFolder = file.getParentDirectory().getFileName().toLowerCase();
 
             // {* CONSULTA AL MOTOR DE APRENDIZAJE AUTÓNOMO *}
-            for (auto& keyword : learnedPatternsDatabase.getAllKeys())
+            for (const auto& keyword : learnedKeywords)
             {
                 if (parentFolder.contains(keyword.toLowerCase()))
                 {
@@ -695,51 +996,48 @@ void MainComponent::applyFilters()
 
         if (isMidi) currentCat = "MIDI";
 
-        // {* NUEVO: EL ESCUDO DEL FILTRO DE ESTRELLA *}
-        bool isFav = (favoritesDatabase[filePath] == "1");
-        if (showOnlyFavorites && !isFav) continue; // Si el botón está presionado y no es favorito, se salta este sample
+        if (catFilter == 2 && currentCat != "LOOP") continue;
+        if (catFilter == 3 && currentCat != "ONE SHOT") continue;
+        if (catFilter == 4 && currentCat != "SAMPLE") continue;
 
-        bool matchesType = true;
-        if (typeFilter == 2 && isMidi) matchesType = false;
-        if (typeFilter == 3 && !isMidi) matchesType = false;
+        matchingAudioFiles.add(file);
+        matchingCategories.add(currentCat);
 
-        // Evaluamos el filtro de Categoría
-        bool matchesCat = true;
-        if (catFilter == 2 && currentCat != "LOOP") matchesCat = false;
-        if (catFilter == 3 && currentCat != "ONE SHOT") matchesCat = false;
-        if (catFilter == 4 && currentCat != "SAMPLE") matchesCat = false;
-
-        bool matchesText = searchText.isEmpty() || fileName.contains(searchText);
-        bool matchesBpm = bpmText.isEmpty() || fileName.contains(bpmText);
-
-        bool matchesKey = true;
-        if (!isAllKeys)
+        if (bpmLookup.contains(filePath))
         {
-            juce::String var1 = note + " " + scale;
-            juce::String var2 = note + scale;
-            juce::String var3 = note + "_" + scale;
-            juce::String var4 = note + "-" + scale;
-            if (!fileName.contains(var1) && !fileName.contains(var2) && !fileName.contains(var3) && !fileName.contains(var4))
-                matchesKey = false;
+            matchingBPMs.add(bpmLookup[filePath]);
+            matchingKeys.add(keyLookup[filePath]);
         }
-
-        if (matchesText && matchesBpm && matchesKey && matchesType && matchesCat)
+        else
         {
-            filteredAudioFiles.add(file);
-            filteredCategories.add(currentCat);
-            filteredFavorites.add(isFav);       // Sincronizamos la estrella visual
-
-            if (bpmDatabase.containsKey(filePath)) {
-                filteredBPMs.add(bpmDatabase[filePath]);
-                filteredKeys.add(keyDatabase[filePath]);
-            }
-            else {
-                filteredBPMs.add(extractBPMFromName(fileName));
-                filteredKeys.add(extractKeyFromName(fileName));
-            }
+            matchingBPMs.add(extractBPMFromName(fileName));
+            matchingKeys.add(extractKeyFromName(fileName));
         }
     }
 
+    updateFavoriteView();
+}
+
+void MainComponent::updateFavoriteView()
+{
+    const bool onlyFavorites = favFilterButton.getToggleState();
+    filteredAudioFiles.clear();
+    filteredBPMs.clear();
+    filteredKeys.clear();
+    filteredCategories.clear();
+    filteredFavorites.clear();
+
+    for (int i = 0; i < matchingAudioFiles.size(); ++i)
+    {
+        const bool isFavorite = favoritesLookup[matchingAudioFiles[i].getFullPathName()];
+        if (onlyFavorites && !isFavorite) continue;
+
+        filteredAudioFiles.add(matchingAudioFiles[i]);
+        filteredBPMs.add(matchingBPMs[i]);
+        filteredKeys.add(matchingKeys[i]);
+        filteredCategories.add(matchingCategories[i]);
+        filteredFavorites.add(isFavorite);
+    }
     fileList.updateContent();
 }
 
@@ -749,7 +1047,7 @@ juce::String MainComponent::extractBPMFromName(const juce::String& fileName)
     std::string nameStr = fileName.toLowerCase().toStdString();
 
     // Ahora busca números seguidos de "bpm", o solo "bp", o " bpm" (es a prueba de balas)
-    std::regex bpmRegex("([0-9]{2,3})\\s*bp");
+    static const std::regex bpmRegex("([0-9]{2,3})\\s*bp");
     std::smatch match;
 
     if (std::regex_search(nameStr, match, bpmRegex)) {
@@ -763,7 +1061,7 @@ juce::String MainComponent::extractKeyFromName(const juce::String& fileName)
     std::string nameStr = fileName.toLowerCase().toStdString();
 
     // Busca las letras A-G, opcional un '#' o 'b', seguidos de min/maj/minor/major
-    std::regex keyRegex("([a-g][#b]?)\\s*(min|maj|minor|major|m\\b)");
+    static const std::regex keyRegex("([a-g][#b]?)\\s*(min|maj|minor|major|m\\b)");
     std::smatch match;
 
     if (std::regex_search(nameStr, match, keyRegex)) {
@@ -781,221 +1079,295 @@ juce::String MainComponent::extractKeyFromName(const juce::String& fileName)
 
 void MainComponent::analyzeBPM(const juce::File& file)
 {
-    juce::String filePath = file.getFullPathName();
+    const juce::String path = file.getFullPathName();
 
     if (file.hasFileExtension(".mid"))
     {
         bpmDisplayLabel.setText("Archivo MIDI (Sin vista previa)", juce::dontSendNotification);
-        int index = filteredAudioFiles.indexOf(file);
-        if (index >= 0) {
-            filteredBPMs.set(index, "MIDI");
-            filteredKeys.set(index, "--");
-            filteredCategories.set(index, "MIDI");
-            fileList.repaintRow(index);
+        const int row = filteredAudioFiles.indexOf(file);
+        if (row >= 0)
+        {
+            filteredBPMs.set(row, "MIDI");
+            filteredKeys.set(row, "--");
+            filteredCategories.set(row, "MIDI");
+            fileList.repaintRow(row);
         }
         return;
     }
 
-    if (bpmDatabase.containsKey(filePath))
+    if (bpmLookup.contains(path))
     {
-        juce::String savedBPM = bpmDatabase[filePath];
-        juce::String savedKey = keyDatabase[filePath];
+        const juce::String savedBPM = bpmLookup[path];
+        juce::String savedKey = keyLookup[path];
         if (savedKey.isEmpty()) savedKey = "--";
-
         bpmDisplayLabel.setText("BPM: " + savedBPM + " | Key: " + savedKey, juce::dontSendNotification);
-
-        int index = filteredAudioFiles.indexOf(file);
-        if (index >= 0) {
-            filteredBPMs.set(index, savedBPM);
-            filteredKeys.set(index, savedKey);
-            fileList.repaintRow(index);
+        const int row = filteredAudioFiles.indexOf(file);
+        if (row >= 0)
+        {
+            filteredBPMs.set(row, savedBPM);
+            filteredKeys.set(row, savedKey);
+            fileList.repaintRow(row);
         }
         return;
     }
 
+    // El análisis largo se ejecuta fuera del hilo de interfaz; la reproducción ya ha empezado.
     bpmDisplayLabel.setText("Analizando audio...", juce::dontSendNotification);
-
-    auto* reader = audioPlayer.getFormatManager().createReaderFor(file);
-    if (reader != nullptr)
+    analysisPool.removeAllJobs(true, 0);
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    auto rules = learnedPatternsDatabase;
+    // La extracción del nombre usa el método de MainComponent antes de iniciar la tarea.
+    const juce::String nameBPM = extractBPMFromName(file.getFileName());
+    analysisPool.addJob(new BackgroundTask("Analyse sample", [file, path, rules, safeThis, nameBPM](BackgroundTask& job)
     {
-        double durationInSeconds = (double)reader->lengthInSamples / (double)reader->sampleRate;
-
-        BTrack bpmDetector;
-        KeyDetector keyDetector(reader->sampleRate);
-
-        int maxSeconds = 60;
-        juce::int64 numSamplesToRead = juce::jmin(reader->lengthInSamples, (juce::int64)(reader->sampleRate * maxSeconds));
-
-        int hopSize = 512;
-        juce::AudioBuffer<float> buffer(reader->numChannels, hopSize);
-        juce::HeapBlock<double> monoFrame(hopSize);
-        juce::int64 samplesRead = 0;
-
-        int peakCount = 0;
-        int cooldownSamples = 0;
-        const int cooldownThreshold = (int)(reader->sampleRate * 0.15);
-        double runningAverage = 0.0;
-
-        while (samplesRead < numSamplesToRead)
+        const auto result = analyzeAudioInBackground(job, file, rules, nameBPM);
+        if (job.shouldExit()) return;
+        juce::MessageManager::callAsync([safeThis, file, path, result]()
         {
-            int samplesToGet = (int)juce::jmin((juce::int64)hopSize, numSamplesToRead - samplesRead);
-            buffer.clear();
-            reader->read(&buffer, 0, samplesToGet, samplesRead, true, true);
+            if (safeThis == nullptr) return;
 
-            for (int i = 0; i < hopSize; ++i)
+            // Respeta correcciones manuales hechas mientras se analizaba.
+            if (safeThis->bpmLookup.contains(path)) return;
+            if (!result.valid)
             {
-                if (i < samplesToGet)
+                const int selected = safeThis->fileList.getSelectedRow();
+                if (selected >= 0 && selected < safeThis->filteredAudioFiles.size()
+                    && safeThis->filteredAudioFiles[selected] == file)
+                    safeThis->bpmDisplayLabel.setText("Archivo corrupto", juce::dontSendNotification);
+                return;
+            }
+
+            safeThis->bpmDatabase.set(path, result.bpm);
+            safeThis->keyDatabase.set(path, result.key);
+            safeThis->categoryDatabase.set(path, result.category);
+            safeThis->bpmLookup.set(path, result.bpm);
+            safeThis->keyLookup.set(path, result.key);
+            safeThis->categoryLookup.set(path, result.category);
+            const int baseRow = safeThis->matchingAudioFiles.indexOf(file);
+            if (baseRow >= 0)
+            {
+                safeThis->matchingBPMs.set(baseRow, result.bpm);
+                safeThis->matchingKeys.set(baseRow, result.key);
+                safeThis->matchingCategories.set(baseRow, result.category);
+            }
+            const int row = safeThis->filteredAudioFiles.indexOf(file);
+            if (row >= 0)
+            {
+                safeThis->filteredBPMs.set(row, result.bpm);
+                safeThis->filteredKeys.set(row, result.key);
+                safeThis->filteredCategories.set(row, result.category);
+                safeThis->fileList.repaintRow(row);
+
+                if (safeThis->fileList.getSelectedRow() == row)
                 {
-                    float sum = 0.0f;
-                    for (int ch = 0; ch < reader->numChannels; ++ch)
-                        sum += buffer.getReadPointer(ch)[i];
-
-                    monoFrame[i] = (double)(sum / reader->numChannels);
-
-                    double absSample = std::abs(monoFrame[i]);
-                    runningAverage = 0.999 * runningAverage + 0.001 * absSample;
-
-                    if (cooldownSamples > 0) cooldownSamples--;
-
-                    if (absSample > runningAverage * 3.0 && absSample > 0.05 && cooldownSamples == 0)
-                    {
-                        peakCount++;
-                        cooldownSamples = cooldownThreshold;
-                    }
+                    const juce::String label = result.category == "LOOP"
+                        ? result.category + " | BPM: " + result.bpm + " | Key: " + result.key
+                        : result.category + " | Key: " + result.key;
+                    safeThis->bpmDisplayLabel.setText(label, juce::dontSendNotification);
                 }
-                else { monoFrame[i] = 0.0; }
             }
+            safeThis->saveDatabase();
+        });
+    }), true);
+}
 
-            bpmDetector.processAudioFrame(monoFrame.getData());
-            keyDetector.processAudioFrame(monoFrame.getData(), samplesToGet);
-            samplesRead += samplesToGet;
-        }
+// El usuario puede seguir navegando, buscando y reproduciendo durante todo el lote.
+void MainComponent::startBatchAnalysis()
+{
+    if (batchRunning) return;
 
-        double detectedBPM = bpmDetector.getCurrentTempoEstimate();
-        juce::String detectedKey = keyDetector.getDetectedKey();
-        delete reader;
-
-        juce::String fileNameLower = file.getFileName().toLowerCase();
-        juce::String audioType;
-        juce::String parentFolder = file.getParentDirectory().getFileName().toLowerCase();
-
-        bool learnedTypeFound = false;
-        for (auto& keyword : learnedPatternsDatabase.getAllKeys())
-        {
-            if (parentFolder.contains(keyword.toLowerCase()))
-            {
-                audioType = learnedPatternsDatabase[keyword];
-                learnedTypeFound = true;
-                if (audioType == "ONE SHOT" || audioType == "SAMPLE") detectedBPM = 0.0;
-                break;
-            }
-        }
-
-        bool isExplicitLoop = false;
-        bool isExplicitOneShot = false;
-
-        if (!learnedTypeFound)
-        {
-            isExplicitLoop = fileNameLower.contains("loop") || fileNameLower.contains("bpm") ||
-                parentFolder.contains("loop") || parentFolder.contains("melody");
-
-            isExplicitOneShot = fileNameLower.contains("oneshot") || fileNameLower.contains("one shot") ||
-                fileNameLower.contains("fx") || fileNameLower.contains("impact") ||
-                fileNameLower.contains("crash") || fileNameLower.contains("riser") ||
-                fileNameLower.contains("sweep") || fileNameLower.contains("cymbal") ||
-                fileNameLower.contains("kick") || fileNameLower.contains("snare") ||
-                fileNameLower.contains("clap") || fileNameLower.contains("hat") ||
-                fileNameLower.contains("808") || fileNameLower.contains("shaker") ||
-                fileNameLower.contains("perc") || fileNameLower.contains("tom") ||
-                fileNameLower.contains("vocal") || fileNameLower.contains("chant") ||
-                fileNameLower.contains("fill") ||
-                parentFolder.contains("oneshot") || parentFolder.contains("one shot") ||
-                parentFolder.contains("drum") || parentFolder.contains("fx") ||
-                parentFolder.contains("kick") || parentFolder.contains("snare") ||
-                parentFolder.contains("hat") || parentFolder.contains("perc") ||
-                parentFolder.contains("cymbal");
-        }
-
-        if (learnedTypeFound)
-        {
-            // audioType ya se definió por la base de datos de aprendizaje
-        }
-        else if (isExplicitOneShot)
-        {
-            audioType = "ONE SHOT";
-            detectedBPM = 0.0;
-        }
-        else if (isExplicitLoop)
-        {
-            audioType = "LOOP";
-        }
-        else
-        {
-            if (durationInSeconds <= 3.5)
-            {
-                audioType = "ONE SHOT";
-                detectedBPM = 0.0;
-            }
-            else if (detectedBPM > 0.0 && peakCount >= 4)
-            {
-                audioType = "LOOP";
-            }
-            else if (peakCount < 4)
-            {
-                audioType = "ONE SHOT";
-                detectedBPM = 0.0;
-            }
-            else
-            {
-                audioType = "SAMPLE";
-            }
-        }
-
-        juce::String nameBPM = extractBPMFromName(file.getFileName());
-        if (nameBPM != "--" && audioType == "LOOP")
-        {
-            detectedBPM = nameBPM.getDoubleValue();
-        }
-
-        int index = filteredAudioFiles.indexOf(file);
-
-        if (audioType == "LOOP")
-        {
-            int finalBPM = std::round(detectedBPM);
-            juce::String bpmString = juce::String(finalBPM);
-
-            bpmDisplayLabel.setText(audioType + " | BPM: " + bpmString + " | Key: " + detectedKey, juce::dontSendNotification);
-
-            if (index >= 0) {
-                filteredBPMs.set(index, bpmString);
-                filteredKeys.set(index, detectedKey);
-                filteredCategories.set(index, audioType);
-                fileList.repaintRow(index);
-            }
-            bpmDatabase.set(filePath, bpmString);
-            keyDatabase.set(filePath, detectedKey);
-            categoryDatabase.set(filePath, audioType);
-        }
-        else
-        {
-            bpmDisplayLabel.setText(audioType + " | Key: " + detectedKey, juce::dontSendNotification);
-
-            if (index >= 0) {
-                filteredBPMs.set(index, "--");
-                filteredKeys.set(index, detectedKey);
-                filteredCategories.set(index, audioType);
-                fileList.repaintRow(index);
-            }
-            bpmDatabase.set(filePath, "--");
-            keyDatabase.set(filePath, detectedKey);
-            categoryDatabase.set(filePath, audioType);
-        }
-        saveDatabase();
-    }
-    else
+    if (lastSelectedFolder.isEmpty())
     {
-        bpmDisplayLabel.setText("Archivo corrupto", juce::dontSendNotification);
+        juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+            juce::String::fromUTF8("An\303\241lisis de librer\303\255as"), juce::String::fromUTF8("Primero selecciona una carpeta ra\303\255z v\303\241lida."));
+        return;
     }
+    const juce::File root(lastSelectedFolder);
+    if (!root.isDirectory())
+    {
+        juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+            juce::String::fromUTF8("An\303\241lisis de librer\303\255as"), juce::String::fromUTF8("La carpeta ra\303\255z ya no existe."));
+        return;
+    }
+
+    const int generation = ++batchGeneration;
+    auto control = std::make_shared<SampleBatchControl>();
+    batchControl = control;
+    batchRunning = true;
+    lastBatchPersistAt = juce::Time::getMillisecondCounter();
+    batchStatusLabel.setText("Analizando: buscando archivos...", juce::dontSendNotification);
+
+    // Copias de datos: el trabajador nunca leerá bases ni controles de la interfaz.
+    const auto rules = learnedPatternsDatabase;
+    const auto analyzedPaths = bpmDatabase.getAllKeys();
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+
+    batchPool.addJob(new BackgroundTask("Index and analyze entire sample library",
+        [root, rules, analyzedPaths, control, generation, safeThis](BackgroundTask& job)
+    {
+        const auto stopped = [&job, &control]()
+        {
+            return job.shouldExit() || control->cancelRequested.load();
+        };
+
+        // La pausa manual y la reproducción se comprueban también mientras se buscan archivos.
+        const auto waitForTurn = [&stopped, &control]()
+        {
+            while ((control->paused.load() || control->playbackActive.load()) && !stopped())
+                juce::Thread::sleep(40);
+            return !stopped();
+        };
+
+        const auto report = [safeThis, generation](const juce::String& message)
+        {
+            juce::MessageManager::callAsync([safeThis, generation, message]()
+            {
+                if (safeThis != nullptr && safeThis->batchGeneration == generation && safeThis->batchRunning)
+                    safeThis->batchStatusLabel.setText(message, juce::dontSendNotification);
+            });
+        };
+
+        // Indexamos solo WAV/MP3/AIF/AIFF. MIDI no requiere BPM ni detección de key.
+        std::vector<juce::File> files;
+        std::vector<juce::File> folders { root };
+        std::unordered_set<std::string> visited;
+        while (!folders.empty() && !stopped())
+        {
+            if (!waitForTurn()) break;
+            auto folder = folders.back();
+            folders.pop_back();
+            if (!visited.insert(folder.getFullPathName().toLowerCase().toStdString()).second)
+                continue;
+
+            juce::DirectoryIterator iterator(folder, false, "*", juce::File::findFilesAndDirectories);
+            while (iterator.next() && !stopped())
+            {
+                const auto child = iterator.getFile();
+                if (child.isDirectory())
+                {
+                    // No seguir enlaces/junctions que puedan formar ciclos o salir de la librería.
+                    if (!child.isSymbolicLink()) folders.push_back(child);
+                }
+                else if (child.hasFileExtension(".wav;.mp3;.aif;.aiff"))
+                    files.push_back(child);
+            }
+        }
+
+        const int total = static_cast<int>(files.size());
+        int done = 0, skipped = 0, analyzed = 0, failed = 0;
+        std::vector<BatchCompletedResult> completed;
+        completed.reserve(8);
+        auto lastReport = juce::Time::getMillisecondCounter();
+        auto lastFlush = lastReport;
+
+        // Se envían pequeños grupos completos al hilo UI; solo él modifica el XML/cache.
+        const auto postCompleted = [&completed, safeThis]()
+        {
+            if (completed.empty()) return;
+            auto ready = std::move(completed);
+            completed.clear();
+            juce::MessageManager::callAsync([safeThis, ready = std::move(ready)]()
+            {
+                if (safeThis == nullptr) return;
+                bool changed = false;
+                for (const auto& item : ready)
+                {
+                    const auto path = item.file.getFullPathName();
+                    // Puede haberse analizado en la vista previa o editado manualmente.
+                    if (safeThis->bpmLookup.contains(path)) continue;
+                    safeThis->bpmDatabase.set(path, item.analysis.bpm);
+                    safeThis->keyDatabase.set(path, item.analysis.key);
+                    safeThis->categoryDatabase.set(path, item.analysis.category);
+                    safeThis->bpmLookup.set(path, item.analysis.bpm);
+                    safeThis->keyLookup.set(path, item.analysis.key);
+                    safeThis->categoryLookup.set(path, item.analysis.category);
+                    changed = true;
+                }
+                if (changed) safeThis->saveDatabase();
+            });
+        };
+
+        if (!stopped())
+        {
+            report(juce::String::fromUTF8("An\303\241lisis: 0 / ") + juce::String(total) + " archivos");
+            std::unordered_set<std::string> known;
+            known.reserve(static_cast<size_t>(analyzedPaths.size()) + 64);
+            for (const auto& path : analyzedPaths)
+                known.insert(path.toLowerCase().toStdString());
+
+            for (const auto& file : files)
+            {
+                if (stopped() || !waitForTurn()) break;
+                const auto path = file.getFullPathName();
+                if (known.find(path.toLowerCase().toStdString()) != known.end())
+                    ++skipped;
+                else
+                {
+                    // La misma función que usa la vista previa; evita resultados incompatibles.
+                    const auto result = analyzeAudioInBackground(job, file, rules, {}, control);
+                    if (stopped()) break;
+                    if (result.valid)
+                    {
+                        completed.push_back({ file, result });
+                        ++analyzed;
+                    }
+                    else ++failed;
+                }
+                ++done;
+                const auto now = juce::Time::getMillisecondCounter();
+                if (completed.size() >= 8 || now - lastFlush >= 2500)
+                {
+                    postCompleted();
+                    lastFlush = now;
+                }
+
+                if (now - lastReport >= 850)
+                {
+                    report(juce::String::fromUTF8("An\303\241lisis: ") + juce::String(done) + "/" + juce::String(total)
+                           + " (" + juce::String(total > 0 ? (done * 100 / total) : 100)
+                           + "%) | Nuevos: " + juce::String(analyzed));
+                    lastReport = now;
+                }
+            }
+        }
+
+        // Incluso tras Cancelar: los resultados ya terminados se entregan y guardan.
+        postCompleted();
+        const bool wasCancelled = stopped();
+        juce::MessageManager::callAsync([safeThis, generation, wasCancelled, done, total, analyzed, skipped, failed]()
+        {
+            if (safeThis == nullptr || safeThis->batchGeneration != generation) return;
+            safeThis->batchRunning = false;
+            safeThis->batchControl.reset();
+            const auto summary = (wasCancelled ? "Cancelado: " : "Finalizado: ")
+                + juce::String(done) + "/" + juce::String(total)
+                + " | Nuevos " + juce::String(analyzed)
+                + ", omitidos " + juce::String(skipped)
+                + ", errores " + juce::String(failed);
+            safeThis->batchStatusLabel.setText(summary, juce::dontSendNotification);
+            // No esperamos al timer para persistir el último grupo de resultados.
+            safeThis->flushDatabaseSave();
+            // Refrescamos la lista visible una sola vez; nunca después de cada archivo.
+            safeThis->applyFilters();
+        });
+    }), true);
+}
+
+void MainComponent::pauseOrResumeBatchAnalysis()
+{
+    if (!batchRunning || !batchControl || batchControl->cancelRequested.load()) return;
+    const bool paused = !batchControl->paused.load();
+    batchControl->paused.store(paused);
+    batchStatusLabel.setText(paused ? juce::String::fromUTF8("An\303\241lisis pausado (Config. para reanudar)")
+                                    : juce::String::fromUTF8("An\303\241lisis reanudado..."), juce::dontSendNotification);
+}
+
+void MainComponent::cancelBatchAnalysis()
+{
+    if (!batchRunning || !batchControl) return;
+    batchControl->cancelRequested.store(true);
+    batchStatusLabel.setText(juce::String::fromUTF8("Cancelando... se guardar\303\241n los archivos terminados."),
+                             juce::dontSendNotification);
 }
 
 void MainComponent::loadDatabase()
@@ -1018,45 +1390,116 @@ void MainComponent::loadDatabase()
                 juce::String cat = child->getStringAttribute("category", "--");
                 juce::String fav = child->getStringAttribute("fav", "0"); // Carga si es favorito
 
-                bpmDatabase.set(path, bpm);
-                keyDatabase.set(path, key);
-                categoryDatabase.set(path, cat);
-                favoritesDatabase.set(path, fav); // Guarda en RAM
+                // No inventamos metadatos para archivos guardados únicamente como favoritos.
+                if (child->hasAttribute("bpm")) { bpmDatabase.set(path, bpm); bpmLookup.set(path, bpm); }
+                if (child->hasAttribute("key")) { keyDatabase.set(path, key); keyLookup.set(path, key); }
+                if (child->hasAttribute("category")) { categoryDatabase.set(path, cat); categoryLookup.set(path, cat); }
+                favoritesDatabase.set(path, fav);
+                favoritesLookup.set(path, fav == "1");
             }
         }
     }
 }
 
-    void MainComponent::saveDatabase()
+void MainComponent::saveDatabase()
+{
+    databaseSavePending = true;
+    databaseSaveRequestedAt = juce::Time::getMillisecondCounter();
+}
+
+void MainComponent::flushDatabaseSave()
+{
+    if (!databaseSavePending) return;
+    databaseSavePending = false;
+
+    // Copia coherente en el hilo de UI; la construcción del XML y la escritura serán en disco aparte.
+    const auto folder = lastSelectedFolder;
+    const auto target = databaseFile;
+    const auto rules = learnedPatternsDatabase;
+    const auto bpms = bpmDatabase;
+    const auto keys = keyDatabase;
+    const auto categories = categoryDatabase;
+    const auto favorites = favoritesDatabase;
+
+    databaseWritePool.addJob(new BackgroundTask("Save sample cache",
+        [folder, target, rules, bpms, keys, categories, favorites](BackgroundTask&)
     {
         juce::XmlElement xml("BPM_CACHE");
+        xml.setAttribute("lastFolder", folder);
 
-        xml.setAttribute("lastFolder", lastSelectedFolder);
-
-        // Guardamos las reglas que el programa ha aprendido autónomamente
-        for (auto keyword : learnedPatternsDatabase.getAllKeys())
+        for (int i = 0; i < rules.size(); ++i)
         {
-            auto* child = xml.createNewChildElement("LEARNED_RULE");
-            child->setAttribute("keyword", keyword);
-            child->setAttribute("type", learnedPatternsDatabase[keyword]);
+            auto* rule = xml.createNewChildElement("LEARNED_RULE");
+            rule->setAttribute("keyword", rules.getAllKeys()[i]);
+            rule->setAttribute("type", rules.getAllValues()[i]);
         }
 
-        // Guardamos el caché de los archivos individuales
-        for (auto path : bpmDatabase.getAllKeys())
+        // Un índice por ruta evita búsquedas cuadráticas en bibliotecas grandes.
+        juce::HashMap<juce::String, juce::XmlElement*> entries;
+        auto writeAttribute = [&xml, &entries](const juce::StringPairArray& values, const char* attribute)
         {
-            auto* child = xml.createNewChildElement("FILE");
-            child->setAttribute("path", path);
-            child->setAttribute("bpm", bpmDatabase[path]);
-            child->setAttribute("key", keyDatabase[path]);
-            child->setAttribute("category", categoryDatabase[path]);
-        }
+            for (int i = 0; i < values.size(); ++i)
+            {
+                const auto& path = values.getAllKeys()[i];
+                auto* node = entries[path.toLowerCase()];
+                if (node == nullptr)
+                {
+                    node = xml.createNewChildElement("FILE");
+                    node->setAttribute("path", path);
+                    entries.set(path.toLowerCase(), node);
+                }
+                node->setAttribute(attribute, values.getAllValues()[i]);
+            }
+        };
 
-        xml.writeTo(databaseFile);
-    }
+        writeAttribute(bpms, "bpm");
+        writeAttribute(keys, "key");
+        writeAttribute(categories, "category");
+        writeAttribute(favorites, "fav");
+
+        // JUCE File::replaceWithText crea su propio archivo temporal y evita
+        // depender de la construcción/copia de juce::TemporaryFile aquí.
+        target.replaceWithText(xml.toString());
+    }), true);
+}
 
 // {* NUEVO: El actualizador de la pantalla MIDI *}
 void MainComponent::timerCallback()
 {
+    const auto now = juce::Time::getMillisecondCounter();
+
+    // Un guardado periódico cada 10 s protege lo completado sin escribir XML
+    // después de cada resultado; fuera del lote mantenemos 650 ms.
+    if (databaseSavePending &&
+        ((batchRunning && now - lastBatchPersistAt >= 10000)
+         || (!batchRunning && now - databaseSaveRequestedAt >= 650)))
+    {
+        lastBatchPersistAt = now;
+        flushDatabaseSave();
+    }
+
+    if (batchControl)
+    {
+        const bool grace = static_cast<juce::int32>(previewPauseUntil - now) > 0;
+        // La escucha y el análisis bajo demanda tienen prioridad sobre el lote.
+        const bool previewNeedsCPU = pendingAnalysisFile != juce::File()
+                                     || analysisPool.getNumJobs() > 0;
+        batchControl->playbackActive.store(grace || audioPlayer.isPreviewPlaying() || previewNeedsCPU);
+    }
+
+    if (pendingAnalysisFile != juce::File() && now - pendingAnalysisRequestedAt >= 450)
+    {
+        const auto file = pendingAnalysisFile;
+        pendingAnalysisFile = juce::File();
+        if (file.existsAsFile()) analyzeBPM(file);
+    }
+
+    if (filterInputPending && (juce::Time::getMillisecondCounter() - lastFilterInputTime) >= 120)
+    {
+        filterInputPending = false;
+        applyFilters();
+    }
+
     if (audioPlayer.getIsMidiLoaded())
     {
         waveformDisplay.setMidiMode(true);
