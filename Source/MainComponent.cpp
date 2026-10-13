@@ -289,7 +289,7 @@ void MainComponent::selectionChanged()
         applyFilters();
     }
 
-    searchBar.setText("", juce::dontSendNotification);
+    // Conservamos la búsqueda al navegar entre carpetas.
     fileList.updateContent();
 }
 
@@ -1018,10 +1018,11 @@ void MainComponent::loadDatabase()
                 juce::String cat = child->getStringAttribute("category", "--");
                 juce::String fav = child->getStringAttribute("fav", "0"); // Carga si es favorito
 
-                bpmDatabase.set(path, bpm);
-                keyDatabase.set(path, key);
-                categoryDatabase.set(path, cat);
-                favoritesDatabase.set(path, fav); // Guarda en RAM
+                // No inventamos metadatos para archivos guardados únicamente como favoritos.
+                if (child->hasAttribute("bpm")) bpmDatabase.set(path, bpm);
+                if (child->hasAttribute("key")) keyDatabase.set(path, key);
+                if (child->hasAttribute("category")) categoryDatabase.set(path, cat);
+                favoritesDatabase.set(path, fav);
             }
         }
     }
@@ -1041,14 +1042,22 @@ void MainComponent::loadDatabase()
             child->setAttribute("type", learnedPatternsDatabase[keyword]);
         }
 
-        // Guardamos el caché de los archivos individuales
-        for (auto path : bpmDatabase.getAllKeys())
+        // Guardamos los metadatos y también los favoritos sin BPM analizado.
+        juce::StringArray allPaths;
+        allPaths.addArray(bpmDatabase.getAllKeys());
+        allPaths.addArray(keyDatabase.getAllKeys());
+        allPaths.addArray(categoryDatabase.getAllKeys());
+        allPaths.addArray(favoritesDatabase.getAllKeys());
+        allPaths.removeDuplicates(false);
+
+        for (const auto& path : allPaths)
         {
             auto* child = xml.createNewChildElement("FILE");
             child->setAttribute("path", path);
-            child->setAttribute("bpm", bpmDatabase[path]);
-            child->setAttribute("key", keyDatabase[path]);
-            child->setAttribute("category", categoryDatabase[path]);
+            if (bpmDatabase.containsKey(path)) child->setAttribute("bpm", bpmDatabase[path]);
+            if (keyDatabase.containsKey(path)) child->setAttribute("key", keyDatabase[path]);
+            if (categoryDatabase.containsKey(path)) child->setAttribute("category", categoryDatabase[path]);
+            child->setAttribute("fav", favoritesDatabase[path] == "1" ? "1" : "0");
         }
 
         xml.writeTo(databaseFile);
