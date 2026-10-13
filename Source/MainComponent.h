@@ -57,6 +57,7 @@ private:
     // Las tareas de disco y de análisis no deben bloquear la interfaz de audio.
     juce::ThreadPool scanPool{ 1 };
     juce::ThreadPool analysisPool{ 1 };
+    juce::ThreadPool databaseWritePool{ 1 };
     int scanGeneration = 0;
     bool filterInputPending = false;
     juce::uint32 lastFilterInputTime = 0;
@@ -79,6 +80,11 @@ private:
 
     juce::Array<juce::File> audioFilesInFolder;
     juce::Array<juce::File> filteredAudioFiles;
+    // Los filtros de nombre/BPM/key se calculan una vez; Favs solo cambia la vista.
+    juce::Array<juce::File> matchingAudioFiles;
+    juce::StringArray matchingBPMs, matchingKeys, matchingCategories;
+    void updateFavoriteView();
+    void previewAudio(const juce::File& file);
 
     // {* NUEVO: Filtro y cabecera de Categoría *}
     juce::ComboBox categoryBox;
@@ -91,6 +97,8 @@ private:
     // {* NUEVO: Memoria y botón para Favoritos *}
     juce::Array<bool> filteredFavorites;
     juce::StringPairArray favoritesDatabase;
+    juce::HashMap<juce::String, bool> favoritesLookup;
+    juce::HashMap<juce::String, juce::String> bpmLookup, keyLookup, categoryLookup;
     juce::ToggleButton favFilterButton{ "Favs" };
 
     // {* NUEVO CÓDIGO: Arreglos paralelos y extractores *}
@@ -103,7 +111,12 @@ private:
     juce::StringPairArray learnedPatternsDatabase; // {* NUEVO: Guarda palabras_clave = tipo_archivo *}
 
     void loadDatabase();
-    void saveDatabase();
+    void saveDatabase(); // Programa un guardado, no escribe en el hilo de UI.
+    void flushDatabaseSave();
+    bool databaseSavePending = false;
+    juce::uint32 databaseSaveRequestedAt = 0;
+    juce::File pendingAnalysisFile;
+    juce::uint32 pendingAnalysisRequestedAt = 0;
 
     juce::String extractBPMFromName(const juce::String& fileName);
     juce::String extractKeyFromName(const juce::String& fileName); // <-- Nuevo extractor
