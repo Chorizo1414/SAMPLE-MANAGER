@@ -1,7 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
-#include <regex> // {* nuevo código: Librería para buscar patrones de texto *}
+#include <regex> // {* nuevo cÃ³digo: LibrerÃ­a para buscar patrones de texto *}
 #include "WaveformDisplay.h"
 #include "TransportControls.h"
 #include "AudioPlayer.h"
@@ -54,6 +54,12 @@ private:
     juce::TextButton settingsButton{ "Configuracion de Audio" };
     juce::String lastSelectedFolder;
     juce::TimeSliceThread directoryThread{ "Directory Thread" };
+    // Las tareas de disco y de anÃ¡lisis no deben bloquear la interfaz de audio.
+    juce::ThreadPool scanPool{ 1 };
+    juce::ThreadPool analysisPool{ 1 };
+    int scanGeneration = 0;
+    bool filterInputPending = false;
+    juce::uint32 lastFilterInputTime = 0;
     juce::WildcardFileFilter fileFilter{ "*.wav;*.mp3;*.aif;*.mid", "*", "Audio Files" };
     juce::DirectoryContentsList directoryList{ &fileFilter, directoryThread };
     juce::FileTreeComponent directoryTree{ directoryList };
@@ -66,7 +72,7 @@ private:
 
     juce::Label bpmDisplayLabel;
 
-    // {* NUEVO CÓDIGO: Cabeceras de la tabla *}
+    // {* NUEVO CÃ“DIGO: Cabeceras de la tabla *}
     juce::Label headerName{ {}, "Name" };
     juce::Label headerKey{ {}, "Key" };
     juce::Label headerBPM{ {}, "BPM" };
@@ -74,26 +80,26 @@ private:
     juce::Array<juce::File> audioFilesInFolder;
     juce::Array<juce::File> filteredAudioFiles;
 
-    // {* NUEVO: Filtro y cabecera de Categoría *}
+    // {* NUEVO: Filtro y cabecera de CategorÃ­a *}
     juce::ComboBox categoryBox;
     juce::Label headerCategory{ {}, "Type" };
 
-    // {* NUEVO: Memoria para las categorías *}
+    // {* NUEVO: Memoria para las categorÃ­as *}
     juce::StringArray filteredCategories;
     juce::StringPairArray categoryDatabase;
 
-    // {* NUEVO: Memoria y botón para Favoritos *}
+    // {* NUEVO: Memoria y botÃ³n para Favoritos *}
     juce::Array<bool> filteredFavorites;
     juce::StringPairArray favoritesDatabase;
     juce::ToggleButton favFilterButton{ "Favs" };
 
-    // {* NUEVO CÓDIGO: Arreglos paralelos y extractores *}
+    // {* NUEVO CÃ“DIGO: Arreglos paralelos y extractores *}
     juce::StringArray filteredBPMs;
     juce::StringArray filteredKeys; // <-- Para guardar la tonalidad
 
     juce::StringPairArray bpmDatabase; // Un diccionario que guarda "Ruta del Archivo" = "BPM"
     juce::StringPairArray keyDatabase;
-    juce::File databaseFile;           // El archivo físico en tu disco duro
+    juce::File databaseFile;           // El archivo fÃ­sico en tu disco duro
     juce::StringPairArray learnedPatternsDatabase; // {* NUEVO: Guarda palabras_clave = tipo_archivo *}
 
     void loadDatabase();
