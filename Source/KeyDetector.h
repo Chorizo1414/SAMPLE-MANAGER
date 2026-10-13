@@ -12,7 +12,10 @@ public:
         fftSize = 4096;
         fftCfg = kiss_fft_alloc(fftSize, 0, nullptr, nullptr);
         window.resize(fftSize);
-        // Creamos una ventana de Hanning para precisiÛn de frecuencias
+        buffer.reserve(fftSize);
+        fftIn.resize(fftSize);
+        fftOut.resize(fftSize);
+        // Creamos una ventana de Hanning para precisi√≥n de frecuencias
         for (int i = 0; i < fftSize; ++i)
             window[i] = 0.5f * (1.0f - std::cos(2.0f * juce::MathConstants<float>::pi * i / (fftSize - 1)));
     }
@@ -36,7 +39,7 @@ public:
 
     juce::String getDetectedKey()
     {
-        // Perfiles Krumhansl-Schmuckler (Est·ndar de la Industria para Tonalidades)
+        // Perfiles Krumhansl-Schmuckler (Est√°ndar de la Industria para Tonalidades)
         double majProfile[12] = { 6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88 };
         double minProfile[12] = { 6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17 };
         juce::String notes[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
@@ -45,7 +48,7 @@ public:
         double maxCorr = -1.0;
         juce::String detectedKey = "--";
 
-        // Comparamos el audio extraÌdo contra las 24 tonalidades posibles
+        // Comparamos el audio extra√≠do contra las 24 tonalidades posibles
         for (int i = 0; i < 24; ++i) {
             bool isMinor = (i >= 12);
             int root = i % 12;
@@ -65,17 +68,18 @@ private:
     std::vector<double> buffer;
     std::vector<float> window;
     std::vector<double> chromagram;
+    // Reservadas una √∫nica vez por an√°lisis: no hacer asignaciones en cada FFT.
+    std::vector<kiss_fft_cpx> fftIn, fftOut;
 
     void processFFT()
     {
-        std::vector<kiss_fft_cpx> fftIn(fftSize), fftOut(fftSize);
         for (int i = 0; i < fftSize; ++i) {
             fftIn[i].r = (float)buffer[i] * window[i];
             fftIn[i].i = 0.0f;
         }
         kiss_fft(fftCfg, fftIn.data(), fftOut.data());
 
-        // Extraemos la energÌa musical y la mapeamos a las 12 notas
+        // Extraemos la energ√≠a musical y la mapeamos a las 12 notas
         for (int i = 1; i < fftSize / 2; ++i) {
             double mag = std::sqrt(fftOut[i].r * fftOut[i].r + fftOut[i].i * fftOut[i].i);
             double freq = i * sr / fftSize;
