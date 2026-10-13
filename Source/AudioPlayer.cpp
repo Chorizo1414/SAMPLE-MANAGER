@@ -101,26 +101,29 @@ void AudioPlayer::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferTo
             double timeAdvance = bufferToFill.numSamples * timePerSample * speed;
             double endTime = currentMidiTime + timeAdvance;
 
-            for (int i = 0; i < midiSequence.getNumEvents(); ++i)
+            // La secuencia está ordenada por tiempo: solo examinamos los eventos del bloque actual.
+            while (nextMidiEventIndex < midiSequence.getNumEvents())
             {
-                auto* event = midiSequence.getEventPointer(i);
-                double eventTime = event->message.getTimeStamp();
+                auto* event = midiSequence.getEventPointer(nextMidiEventIndex);
+                const double eventTime = event->message.getTimeStamp();
+                if (eventTime >= endTime) break;
 
-                if (eventTime >= currentMidiTime && eventTime < endTime)
+                ++nextMidiEventIndex;
+                if (eventTime < currentMidiTime) continue;
+
+                auto msg = event->message;
+
+                // PITCH FIX: Transponemos las notas sumando semitonos.
+                if (msg.isNoteOn() || msg.isNoteOff())
                 {
-                    auto msg = event->message;
-
-                    // 2. PITCH FIX: Transponemos las notas sumando semitonos
-                    if (msg.isNoteOn() || msg.isNoteOff())
-                    {
-                        int newNote = msg.getNoteNumber() + (int)currentPitchSemitones;
-                        newNote = juce::jlimit(0, 127, newNote); // Evitamos que la nota explote
-                        msg.setNoteNumber(newNote);
-                    }
-
-                    int samplePos = bufferToFill.startSample + (int)((eventTime - currentMidiTime) * currentSampleRate / speed);
-                    midiBuffer.addEvent(msg, samplePos);
+                    int newNote = msg.getNoteNumber() + (int)currentPitchSemitones;
+                    newNote = juce::jlimit(0, 127, newNote);
+                    msg.setNoteNumber(newNote);
                 }
+
+                const int samplePos = bufferToFill.startSample
+                    + (int)((eventTime - currentMidiTime) * currentSampleRate / speed);
+                midiBuffer.addEvent(msg, samplePos);
             }
 
             synth.renderNextBlock(*buffer, midiBuffer, bufferToFill.startSample, bufferToFill.numSamples);
@@ -131,6 +134,7 @@ void AudioPlayer::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferTo
             if (currentMidiTime > midiSequence.getEndTime())
             {
                 currentMidiTime = 0.0;
+                nextMidiEventIndex = 0;
                 if (!isLooping) isPlayingMidi = false;
             }
         }
@@ -166,6 +170,7 @@ void AudioPlayer::loadFile(const juce::File& audioFile)
                 midiSequence.addSequence(*midiFile.getTrack(i), 0.0);
 
             midiSequence.updateMatchedPairs(); // Une el NoteOn con su NoteOff
+            nextMidiEventIndex = 0;
             
             isMidiLoaded = true;
             isPlayingMidi = false;
@@ -196,7 +201,7 @@ void AudioPlayer::play()
 {
     if (isMidiLoaded)
     {
-        if (currentMidiTime >= midiSequence.getEndTime()) currentMidiTime = 0.0;
+        if (currentMidiTime >= midiSequence.getEndTime()) { currentMidiTime = 0.0; nextMidiEventIndex = 0; }
         isPlayingMidi = true;
     }
     else
@@ -214,6 +219,7 @@ void AudioPlayer::stop()
     {
         isPlayingMidi = false;
         currentMidiTime = 0.0;
+        nextMidiEventIndex = 0;
         synth.allNotesOff(0, true);
     }
     else
