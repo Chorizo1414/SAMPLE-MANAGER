@@ -80,6 +80,8 @@ private:
 
     juce::Array<juce::File> audioFilesInFolder;
     juce::Array<juce::File> filteredAudioFiles;
+    // Version de la rama de rendimiento: favoritos cacheados y persistencia diferida.
+    // Si Visual Studio no muestra estas declaraciones, esta usando un header desactualizado.
     // Los filtros de nombre/BPM/key se calculan una vez; Favs solo cambia la vista.
     juce::Array<juce::File> matchingAudioFiles;
     juce::StringArray matchingBPMs, matchingKeys, matchingCategories;
