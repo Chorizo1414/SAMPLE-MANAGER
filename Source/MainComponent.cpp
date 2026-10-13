@@ -1216,14 +1216,23 @@ void MainComponent::startBatchAnalysis(BatchScope scope)
     }
     else
     {
+        // Evitar construir juce::File desde una ruta vacía.
+        if (scope == BatchScope::Root && lastSelectedFolder.isEmpty())
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                juce::String::fromUTF8("An\303\241lisis de librer\303\255as"),
+                juce::String::fromUTF8("Selecciona una carpeta ra\303\255z v\303\241lida antes de analizar."));
+            return;
+        }
+
         root = scope == BatchScope::Root ? juce::File(lastSelectedFolder)
                                          : directoryTree.getSelectedFile();
-        if ((scope == BatchScope::Root && lastSelectedFolder.isEmpty()) || !root.isDirectory())
+        if (!root.isDirectory())
         {
             juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
                 juce::String::fromUTF8("An\303\241lisis de librer\303\255as"),
                 scope == BatchScope::Root
-                    ? juce::String::fromUTF8("Selecciona una carpeta ra\303\255z v\303\241lida antes de analizar.")
+                    ? juce::String::fromUTF8("La carpeta ra\303\255z no existe.")
                     : juce::String::fromUTF8("Selecciona una carpeta en el \303\241rbol de carpetas."));
             return;
         }
@@ -1245,7 +1254,7 @@ void MainComponent::startBatchAnalysis(BatchScope scope)
 
     batchPool.addJob(new BackgroundTask("Analyze selected sample scope",
         [root, scope, searchFiles = std::move(searchFiles),
-         rules, analyzedPaths, control, generation, safeThis](BackgroundTask& job)
+         rules, analyzedPaths, control, generation, safeThis](BackgroundTask& job) mutable
     {
         const auto stopped = [&job, &control]()
         {
