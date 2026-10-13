@@ -299,6 +299,9 @@ MainComponent::MainComponent()
                     juce::File chosenFolder = fc.getResult();
                     if (chosenFolder.isDirectory())
                     {
+                        // Cambiar la raíz detiene el lote anterior sin descartar análisis completados.
+                        if (batchRunning && chosenFolder.getFullPathName() != lastSelectedFolder)
+                            cancelBatchAnalysis();
                         // Guardamos la nueva raíz
                         lastSelectedFolder = chosenFolder.getFullPathName();
                         saveDatabase();
@@ -1478,7 +1481,7 @@ void MainComponent::timerCallback()
     if (batchControl)
     {
         const bool grace = static_cast<juce::int32>(previewPauseUntil - now) > 0;
-        batchControl->playbackActive.store(grace || audioPlayer.getTransportSource().isPlaying());
+        batchControl->playbackActive.store(grace || audioPlayer.isPreviewPlaying());
     }
 
     if (pendingAnalysisFile != juce::File() && now - pendingAnalysisRequestedAt >= 450)
