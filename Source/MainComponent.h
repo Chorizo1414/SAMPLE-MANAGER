@@ -1,6 +1,8 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <atomic>
+#include <memory>
 #include <regex> // {* nuevo código: Librería para buscar patrones de texto *}
 #include "WaveformDisplay.h"
 #include "TransportControls.h"
@@ -9,6 +11,15 @@
 #include "BTrack/BTrack.h"
 #include "KeyDetector.h"
 #include "CustomTheme.h"
+
+// Control compartido entre la interfaz y el trabajador de análisis masivo.
+// Los hilos de fondo nunca acceden directamente a los componentes JUCE.
+struct SampleBatchControl
+{
+    std::atomic<bool> cancelRequested{ false };
+    std::atomic<bool> paused{ false };
+    std::atomic<bool> playbackActive{ false };
+};
 
 //==============================================================================
 class MainComponent  : public juce::AudioAppComponent, 
@@ -58,6 +69,16 @@ private:
     juce::ThreadPool scanPool{ 1, juce::Thread::osDefaultStackSize, juce::Thread::Priority::low };
     juce::ThreadPool analysisPool{ 1, juce::Thread::osDefaultStackSize, juce::Thread::Priority::low };
     juce::ThreadPool databaseWritePool{ 1, juce::Thread::osDefaultStackSize, juce::Thread::Priority::low };
+    juce::ThreadPool batchPool{ 1, juce::Thread::osDefaultStackSize, juce::Thread::Priority::low };
+    std::shared_ptr<SampleBatchControl> batchControl;
+    juce::Label batchStatusLabel;
+    bool batchRunning = false;
+    int batchGeneration = 0;
+    juce::uint32 lastBatchPersistAt = 0;
+    juce::uint32 previewPauseUntil = 0;
+    void startBatchAnalysis();
+    void pauseOrResumeBatchAnalysis();
+    void cancelBatchAnalysis();
     int scanGeneration = 0;
     bool filterInputPending = false;
     juce::uint32 lastFilterInputTime = 0;
