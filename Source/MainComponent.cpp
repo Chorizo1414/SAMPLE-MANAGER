@@ -1193,9 +1193,9 @@ void MainComponent::flushDatabaseSave()
         writeAttribute(categories, "category");
         writeAttribute(favorites, "fav");
 
-        juce::TemporaryFile temporary(target);
-        if (xml.writeTo(temporary.getFile()))
-            temporary.overwriteTargetFileWithTemporary();
+        // JUCE File::replaceWithText crea su propio archivo temporal y evita
+        // depender de la construcción/copia de juce::TemporaryFile aquí.
+        target.replaceWithText(xml.toString());
     }), true);
 }
 
