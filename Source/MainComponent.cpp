@@ -88,6 +88,8 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
 
             bpmDetector.processAudioFrame(monoFrame.getData());
             keyDetector.processAudioFrame(monoFrame.getData(), samplesToGet);
+            // Cedemos CPU a la reproducción y a la UI durante análisis largos.
+            if ((samplesRead / hopSize) % 16 == 0) juce::Thread::sleep(3);
             samplesRead += samplesToGet;
         }
 
@@ -319,7 +321,7 @@ MainComponent::MainComponent()
     // {* NUEVO: Botón interactivo de Favoritos *}
     addAndMakeVisible(favFilterButton);
     favFilterButton.setColour(juce::ToggleButton::textColourId, juce::Colour(0xffe5c07b)); // Color Dorado Premium
-    favFilterButton.onClick = [this] { applyFilters(); };
+    favFilterButton.onClick = [this] { updateFavoriteView(); };
 
     addAndMakeVisible(waveformDisplay);
     addAndMakeVisible(transportControls);
@@ -346,13 +348,7 @@ MainComponent::MainComponent()
         {
             int randomIndex = juce::Random::getSystemRandom().nextInt(filteredAudioFiles.size());
             fileList.selectRow(randomIndex, false, true);
-
-            juce::File selectedAudioFile = filteredAudioFiles[randomIndex];
-            waveformDisplay.setAudioFile(selectedAudioFile);
-            
-            // Ya no hay código espagueti, le decimos al motor que cargue y toque
-            audioPlayer.loadFile(selectedAudioFile);
-            audioPlayer.play();
+            previewAudio(filteredAudioFiles[randomIndex]);
         }
     };
 
@@ -373,6 +369,9 @@ MainComponent::~MainComponent()
 
     scanPool.removeAllJobs(true, 10000);
     analysisPool.removeAllJobs(true, 10000);
+    // Al cerrar no se pierden cambios que seguían pendientes en memoria.
+    if (databaseSavePending) flushDatabaseSave();
+    databaseWritePool.removeAllJobs(false, 30000);
     shutdownAudio();
     directoryThread.stopThread(1000);
 }
@@ -560,15 +559,16 @@ void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
     // {* NUEVO: DETECTAR CLIC IZQUIERDO EXACTO EN LA ESTRELLA *}
     if (e.x < 48 && !e.mods.isPopupMenu())
     {
-        bool currentlyFav = (favoritesDatabase[filePath] == "1");
+        bool currentlyFav = favoritesLookup[filePath];
         juce::String newState = currentlyFav ? "0" : "1";
 
         favoritesDatabase.set(filePath, newState);
+        favoritesLookup.set(filePath, !currentlyFav);
         filteredFavorites.set(row, !currentlyFav);
-        saveDatabase();
+        saveDatabase(); // Guardado diferido; el clic jamás espera al disco.
 
         // Si el botón "Favs" está presionado y le quitas la estrella a uno, desaparece de la vista al instante
-        if (favFilterButton.getToggleState()) applyFilters();
+        if (favFilterButton.getToggleState()) updateFavoriteView();
         else fileList.repaintRow(row);
 
         return; // Salimos de la función para que el audio no se reproduzca solo por marcar la estrella
@@ -597,11 +597,13 @@ void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
                     // 1. Corregimos los datos visuales en tiempo real
                     filteredCategories.set(row, newType);
                     categoryDatabase.set(filePath, newType);
+                    categoryLookup.set(filePath, newType);
 
                     if (newType != "LOOP")
                     {
                         filteredBPMs.set(row, "--");
                         bpmDatabase.set(filePath, "--");
+                        bpmLookup.set(filePath, "--");
                     }
 
                     // 2. ¡SISTEMA DE APRENDIZAJE AUTÓNOMO!
@@ -639,7 +641,9 @@ void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
 
                                     // Actualizamos la base de datos maestra
                                     bpmDatabase.set(filePath, bpmString);
+                                    bpmLookup.set(filePath, bpmString);
                                     categoryDatabase.set(filePath, "LOOP");
+                                    categoryLookup.set(filePath, "LOOP");
 
                                     // Refrescamos TODA la UI y guardamos en el XML para que el cambio se vea al instante
                                     saveDatabase();
@@ -657,22 +661,40 @@ void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
     {
         if (fileList.getSelectedRow() == row)
         {
-            audioPlayer.loadFile(selectedAudioFile);
-            audioPlayer.play();
+            previewAudio(selectedAudioFile);
         }
     }
 }
 
+void MainComponent::previewAudio(const juce::File& file)
+{
+    // Cancelar análisis anterior de forma no bloqueante. La reproducción tiene prioridad.
+    pendingAnalysisFile = juce::File();
+    analysisPool.removeAllJobs(true, 0);
+
+    waveformDisplay.setAudioFile(file);
+    audioPlayer.loadFile(file);
+    audioPlayer.play();
+
+    if (file.hasFileExtension(".mid") || bpmLookup.contains(file.getFullPathName()))
+    {
+        analyzeBPM(file);
+        return;
+    }
+
+    bpmDisplayLabel.setText("Analizando audio...", juce::dontSendNotification);
+    pendingAnalysisFile = file;
+    pendingAnalysisRequestedAt = juce::Time::getMillisecondCounter();
+}
+
 void MainComponent::selectedRowsChanged(int lastRowSelected)
 {
+    // ListBox dispara esta notificación ANTES del clic: una estrella no debe iniciar audio/análisis.
+    if (juce::ModifierKeys::getCurrentModifiersRealtime().isAnyMouseButtonDown())
+        return;
+
     if (lastRowSelected >= 0 && lastRowSelected < filteredAudioFiles.size())
-    {
-        juce::File selectedAudioFile = filteredAudioFiles[lastRowSelected];
-        waveformDisplay.setAudioFile(selectedAudioFile);
-        audioPlayer.loadFile(selectedAudioFile);
-        audioPlayer.play();
-        analyzeBPM(selectedAudioFile);
-    }
+        previewAudio(filteredAudioFiles[lastRowSelected]);
 }
 
 void MainComponent::mouseDrag(const juce::MouseEvent& e)
@@ -834,13 +856,10 @@ void MainComponent::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
 
 void MainComponent::applyFilters()
 {
-    filteredAudioFiles.clear();
-    filteredBPMs.clear();
-    filteredKeys.clear();
-    filteredCategories.clear();
-    filteredFavorites.clear();
-
-    const bool showOnlyFavorites = favFilterButton.getToggleState();
+    matchingAudioFiles.clear();
+    matchingBPMs.clear();
+    matchingKeys.clear();
+    matchingCategories.clear();
     const juce::String searchText = searchBar.getText().toLowerCase();
     const juce::String bpmText = bpmBox.getText().toLowerCase();
     const bool isAllKeys = keyBox.getSelectedId() == 1;
@@ -876,11 +895,10 @@ void MainComponent::applyFilters()
         if (typeFilter == 3 && !isMidi) continue;
 
         const juce::String filePath = file.getFullPathName();
-        const bool isFav = favoritesDatabase[filePath] == "1";
-        if (showOnlyFavorites && !isFav) continue;
+        // El filtro Favs se aplica después sobre una vista ya calculada.
 
         // Extraemos la categoría
-        juce::String currentCat = categoryDatabase.containsKey(filePath) ? categoryDatabase[filePath] : "--";
+        juce::String currentCat = categoryLookup.contains(filePath) ? categoryLookup[filePath] : "--";
         if (currentCat == "--" && !isMidi)
         {
             juce::String parentFolder = file.getParentDirectory().getFileName().toLowerCase();
@@ -917,22 +935,44 @@ void MainComponent::applyFilters()
         if (catFilter == 3 && currentCat != "ONE SHOT") continue;
         if (catFilter == 4 && currentCat != "SAMPLE") continue;
 
-        filteredAudioFiles.add(file);
-        filteredCategories.add(currentCat);
-        filteredFavorites.add(isFav);
+        matchingAudioFiles.add(file);
+        matchingCategories.add(currentCat);
 
-        if (bpmDatabase.containsKey(filePath))
+        if (bpmLookup.contains(filePath))
         {
-            filteredBPMs.add(bpmDatabase[filePath]);
-            filteredKeys.add(keyDatabase[filePath]);
+            matchingBPMs.add(bpmLookup[filePath]);
+            matchingKeys.add(keyLookup[filePath]);
         }
         else
         {
-            filteredBPMs.add(extractBPMFromName(fileName));
-            filteredKeys.add(extractKeyFromName(fileName));
+            matchingBPMs.add(extractBPMFromName(fileName));
+            matchingKeys.add(extractKeyFromName(fileName));
         }
     }
 
+    updateFavoriteView();
+}
+
+void MainComponent::updateFavoriteView()
+{
+    const bool onlyFavorites = favFilterButton.getToggleState();
+    filteredAudioFiles.clear();
+    filteredBPMs.clear();
+    filteredKeys.clear();
+    filteredCategories.clear();
+    filteredFavorites.clear();
+
+    for (int i = 0; i < matchingAudioFiles.size(); ++i)
+    {
+        const bool isFavorite = favoritesLookup[matchingAudioFiles[i].getFullPathName()];
+        if (onlyFavorites && !isFavorite) continue;
+
+        filteredAudioFiles.add(matchingAudioFiles[i]);
+        filteredBPMs.add(matchingBPMs[i]);
+        filteredKeys.add(matchingKeys[i]);
+        filteredCategories.add(matchingCategories[i]);
+        filteredFavorites.add(isFavorite);
+    }
     fileList.updateContent();
 }
 
@@ -990,10 +1030,10 @@ void MainComponent::analyzeBPM(const juce::File& file)
         return;
     }
 
-    if (bpmDatabase.containsKey(path))
+    if (bpmLookup.contains(path))
     {
-        const juce::String savedBPM = bpmDatabase[path];
-        juce::String savedKey = keyDatabase[path];
+        const juce::String savedBPM = bpmLookup[path];
+        juce::String savedKey = keyLookup[path];
         if (savedKey.isEmpty()) savedKey = "--";
         bpmDisplayLabel.setText("BPM: " + savedBPM + " | Key: " + savedKey, juce::dontSendNotification);
         const int row = filteredAudioFiles.indexOf(file);
@@ -1022,7 +1062,7 @@ void MainComponent::analyzeBPM(const juce::File& file)
             if (safeThis == nullptr) return;
 
             // Respeta correcciones manuales hechas mientras se analizaba.
-            if (safeThis->bpmDatabase.containsKey(path)) return;
+            if (safeThis->bpmLookup.contains(path)) return;
             if (!result.valid)
             {
                 const int selected = safeThis->fileList.getSelectedRow();
@@ -1035,6 +1075,16 @@ void MainComponent::analyzeBPM(const juce::File& file)
             safeThis->bpmDatabase.set(path, result.bpm);
             safeThis->keyDatabase.set(path, result.key);
             safeThis->categoryDatabase.set(path, result.category);
+            safeThis->bpmLookup.set(path, result.bpm);
+            safeThis->keyLookup.set(path, result.key);
+            safeThis->categoryLookup.set(path, result.category);
+            const int baseRow = safeThis->matchingAudioFiles.indexOf(file);
+            if (baseRow >= 0)
+            {
+                safeThis->matchingBPMs.set(baseRow, result.bpm);
+                safeThis->matchingKeys.set(baseRow, result.key);
+                safeThis->matchingCategories.set(baseRow, result.category);
+            }
             const int row = safeThis->filteredAudioFiles.indexOf(file);
             if (row >= 0)
             {
@@ -1077,53 +1127,93 @@ void MainComponent::loadDatabase()
                 juce::String fav = child->getStringAttribute("fav", "0"); // Carga si es favorito
 
                 // No inventamos metadatos para archivos guardados únicamente como favoritos.
-                if (child->hasAttribute("bpm")) bpmDatabase.set(path, bpm);
-                if (child->hasAttribute("key")) keyDatabase.set(path, key);
-                if (child->hasAttribute("category")) categoryDatabase.set(path, cat);
+                if (child->hasAttribute("bpm")) { bpmDatabase.set(path, bpm); bpmLookup.set(path, bpm); }
+                if (child->hasAttribute("key")) { keyDatabase.set(path, key); keyLookup.set(path, key); }
+                if (child->hasAttribute("category")) { categoryDatabase.set(path, cat); categoryLookup.set(path, cat); }
                 favoritesDatabase.set(path, fav);
+                favoritesLookup.set(path, fav == "1");
             }
         }
     }
 }
 
-    void MainComponent::saveDatabase()
+void MainComponent::saveDatabase()
+{
+    databaseSavePending = true;
+    databaseSaveRequestedAt = juce::Time::getMillisecondCounter();
+}
+
+void MainComponent::flushDatabaseSave()
+{
+    if (!databaseSavePending) return;
+    databaseSavePending = false;
+
+    // Copia coherente en el hilo de UI; la construcción del XML y la escritura serán en disco aparte.
+    const auto folder = lastSelectedFolder;
+    const auto target = databaseFile;
+    const auto rules = learnedPatternsDatabase;
+    const auto bpms = bpmDatabase;
+    const auto keys = keyDatabase;
+    const auto categories = categoryDatabase;
+    const auto favorites = favoritesDatabase;
+
+    databaseWritePool.addJob(new BackgroundTask("Save sample cache",
+        [folder, target, rules, bpms, keys, categories, favorites](BackgroundTask&)
     {
         juce::XmlElement xml("BPM_CACHE");
+        xml.setAttribute("lastFolder", folder);
 
-        xml.setAttribute("lastFolder", lastSelectedFolder);
-
-        // Guardamos las reglas que el programa ha aprendido autónomamente
-        for (auto keyword : learnedPatternsDatabase.getAllKeys())
+        for (int i = 0; i < rules.size(); ++i)
         {
-            auto* child = xml.createNewChildElement("LEARNED_RULE");
-            child->setAttribute("keyword", keyword);
-            child->setAttribute("type", learnedPatternsDatabase[keyword]);
+            auto* rule = xml.createNewChildElement("LEARNED_RULE");
+            rule->setAttribute("keyword", rules.getAllKeys()[i]);
+            rule->setAttribute("type", rules.getAllValues()[i]);
         }
 
-        // Guardamos los metadatos y también los favoritos sin BPM analizado.
-        juce::StringArray allPaths;
-        allPaths.addArray(bpmDatabase.getAllKeys());
-        allPaths.addArray(keyDatabase.getAllKeys());
-        allPaths.addArray(categoryDatabase.getAllKeys());
-        allPaths.addArray(favoritesDatabase.getAllKeys());
-        allPaths.removeDuplicates(false);
-
-        for (const auto& path : allPaths)
+        // Un índice por ruta evita búsquedas cuadráticas en bibliotecas grandes.
+        juce::HashMap<juce::String, juce::XmlElement*> entries;
+        auto writeAttribute = [&xml, &entries](const juce::StringPairArray& values, const char* attribute)
         {
-            auto* child = xml.createNewChildElement("FILE");
-            child->setAttribute("path", path);
-            if (bpmDatabase.containsKey(path)) child->setAttribute("bpm", bpmDatabase[path]);
-            if (keyDatabase.containsKey(path)) child->setAttribute("key", keyDatabase[path]);
-            if (categoryDatabase.containsKey(path)) child->setAttribute("category", categoryDatabase[path]);
-            child->setAttribute("fav", favoritesDatabase[path] == "1" ? "1" : "0");
-        }
+            for (int i = 0; i < values.size(); ++i)
+            {
+                const auto& path = values.getAllKeys()[i];
+                auto* node = entries[path.toLowerCase()];
+                if (node == nullptr)
+                {
+                    node = xml.createNewChildElement("FILE");
+                    node->setAttribute("path", path);
+                    entries.set(path.toLowerCase(), node);
+                }
+                node->setAttribute(attribute, values.getAllValues()[i]);
+            }
+        };
 
-        xml.writeTo(databaseFile);
-    }
+        writeAttribute(bpms, "bpm");
+        writeAttribute(keys, "key");
+        writeAttribute(categories, "category");
+        writeAttribute(favorites, "fav");
+
+        juce::TemporaryFile temporary(target);
+        if (xml.writeTo(temporary.getFile()))
+            temporary.overwriteTargetFileWithTemporary();
+    }), true);
+}
 
 // {* NUEVO: El actualizador de la pantalla MIDI *}
 void MainComponent::timerCallback()
 {
+    const auto now = juce::Time::getMillisecondCounter();
+
+    if (databaseSavePending && now - databaseSaveRequestedAt >= 650)
+        flushDatabaseSave();
+
+    if (pendingAnalysisFile != juce::File() && now - pendingAnalysisRequestedAt >= 450)
+    {
+        const auto file = pendingAnalysisFile;
+        pendingAnalysisFile = juce::File();
+        if (file.existsAsFile()) analyzeBPM(file);
+    }
+
     if (filterInputPending && (juce::Time::getMillisecondCounter() - lastFilterInputTime) >= 120)
     {
         filterInputPending = false;
