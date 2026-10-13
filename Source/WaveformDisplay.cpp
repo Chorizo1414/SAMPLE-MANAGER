@@ -26,14 +26,19 @@ void WaveformDisplay::changeListenerCallback(juce::ChangeBroadcaster* source)
 
 void WaveformDisplay::setMidiMode(bool isMidi)
 {
+    if (isMidiMode == isMidi) return;
     isMidiMode = isMidi;
     repaint();
 }
 
 void WaveformDisplay::updateMidiPosition(double position, double totalLength)
 {
+    const double length = totalLength > 0.0 ? totalLength : 1.0;
+    if (std::abs(currentMidiPos - position) < 0.001 && std::abs(totalMidiLength - length) < 0.001)
+        return;
+
     currentMidiPos = position;
-    totalMidiLength = totalLength > 0.0 ? totalLength : 1.0;
+    totalMidiLength = length;
     repaint();
 }
 
@@ -121,7 +126,7 @@ void WaveformDisplay::resized() {}
 
 void WaveformDisplay::timerCallback() 
 { 
-    if (transportSource.isPlaying()) 
+    if (!isMidiMode && transportSource.isPlaying())
         repaint(); 
 }
 
@@ -174,6 +179,7 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
 
 void WaveformDisplay::setMidiSequence(const juce::MidiMessageSequence* sequence)
 {
+    if (currentMidiSequence == sequence) return;
     currentMidiSequence = sequence;
     repaint();
 }
