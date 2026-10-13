@@ -228,7 +228,7 @@ void MainComponent::paint(juce::Graphics& g)
 
 void MainComponent::resized()
 {
-    // 1. Botón de agregar carpeta arriba (30px de alto)
+    // 1. Botón de agregar carpeta arriba (30px de alto
     chooseFolderButton.setBounds(0, 0, 300, 30);
 
     // 2. El árbol de carpetas en medio
