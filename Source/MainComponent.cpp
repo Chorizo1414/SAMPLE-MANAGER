@@ -28,7 +28,8 @@ struct AudioAnalysisResult
 };
 
 AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::File& file,
-                                             const juce::StringPairArray& learnedPatterns)
+                                             const juce::StringPairArray& learnedPatterns,
+                                             const juce::String& nameBPM)
 {
     AudioAnalysisResult result;
     juce::AudioFormatManager formatManager;
@@ -169,7 +170,6 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
             }
         }
 
-        juce::String nameBPM = extractBPMFromName(file.getFileName());
         if (nameBPM != "--" && audioType == "LOOP")
         {
             detectedBPM = nameBPM.getDoubleValue();
@@ -1011,9 +1011,11 @@ void MainComponent::analyzeBPM(const juce::File& file)
     analysisPool.removeAllJobs(true, 0);
     juce::Component::SafePointer<MainComponent> safeThis(this);
     auto rules = learnedPatternsDatabase;
-    analysisPool.addJob(new BackgroundTask("Analyse sample", [file, path, rules, safeThis](BackgroundTask& job)
+    // La extracción del nombre usa el método de MainComponent antes de iniciar la tarea.
+    const juce::String nameBPM = extractBPMFromName(file.getFileName());
+    analysisPool.addJob(new BackgroundTask("Analyse sample", [file, path, rules, safeThis, nameBPM](BackgroundTask& job)
     {
-        const auto result = analyzeAudioInBackground(job, file, rules);
+        const auto result = analyzeAudioInBackground(job, file, rules, nameBPM);
         if (job.shouldExit()) return;
         juce::MessageManager::callAsync([safeThis, file, path, result]()
         {
