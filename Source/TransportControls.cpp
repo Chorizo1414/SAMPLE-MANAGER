@@ -51,6 +51,7 @@ TransportControls::TransportControls(juce::AudioTransportSource& transportToUse)
         targetKeyBox.addItem(juce::String(notes[i]) + " Maj", i + 1);
         targetKeyBox.addItem(juce::String(notes[i]) + "m", i + 13);
     }
+    targetKeyBox.setTextWhenNothingSelected("--");
     targetKeyBox.setTooltip("Elige una nota de destino con el mismo modo (mayor o menor).");
     targetKeyBox.onChange = [this]
     {
@@ -93,7 +94,7 @@ TransportControls::TransportControls(juce::AudioTransportSource& transportToUse)
 
     tempoSlider.setSliderStyle(juce::Slider::LinearHorizontal);
     tempoSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 48, 20);
-    tempoSlider.setRange(-50.0, 100.0, 1.0);
+    tempoSlider.setRange(-50.0, 100.0, 0.01);
     tempoSlider.setTextValueSuffix("%");
     tempoSlider.setDoubleClickReturnValue(true, 0.0);
     tempoSlider.onValueChange = [this]
@@ -281,7 +282,7 @@ void TransportControls::showAdvanced(bool enabled)
     tempoSlider.setVisible(enabled);
     pitchLabel.setText(enabled ? "Pitch:" : "Key:", juce::dontSendNotification);
     tempoLabel.setText(enabled ? "Speed:" : "BPM:", juce::dontSendNotification);
-    advancedButton.setButtonText(enabled ? "Keys" : "Fine");
+    advancedButton.setButtonText(enabled ? "Music" : "Fine");
 }
 
 void TransportControls::paint(juce::Graphics& g)
@@ -309,8 +310,8 @@ void TransportControls::resized()
                           .withRight(targetKeyBox.getRight()).withTop(2).withHeight(getHeight() - 4));
 
     auto tempoArea = area.removeFromLeft(155);
-    tempoLabel.setBounds(tempoArea.removeFromLeft(38));
-    sourceBpmLabel.setBounds(tempoArea.removeFromLeft(52));
+    tempoLabel.setBounds(tempoArea.removeFromLeft(46));
+    sourceBpmLabel.setBounds(tempoArea.removeFromLeft(45));
     targetBpmEditor.setBounds(tempoArea.reduced(1));
     tempoSlider.setBounds(getLocalBounds().withLeft(tempoLabel.getRight())
                           .withRight(targetBpmEditor.getRight()).withTop(2).withHeight(getHeight() - 4));
