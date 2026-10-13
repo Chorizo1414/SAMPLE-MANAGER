@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include <atomic>
 #include "SoundTouchAudioSource.h" 
 
 class AudioPlayer
@@ -24,6 +25,10 @@ public:
 
     // {* NUEVO: Control total sobre el MIDI *}
     bool getIsMidiLoaded() const { return isMidiLoaded; }
+    bool isPreviewPlaying() const
+    {
+        return isMidiLoaded ? isPlayingMidi.load() : transportSource.isPlaying();
+    }
     double getMidiPosition() const { return currentMidiTime; }
     double getMidiLength() const { return midiSequence.getEndTime(); }
     void setMidiPosition(double newPos) { currentMidiTime = newPos; nextMidiEventIndex = 0; synth.allNotesOff(0, false); }
@@ -48,8 +53,8 @@ private:
     int nextMidiEventIndex = 0; // Evita recorrer toda la secuencia en cada bloque de audio.
     double currentMidiTime = 0.0;
     double currentSampleRate = 44100.0;
-    bool isMidiLoaded = false;
-    bool isPlayingMidi = false;
+    std::atomic<bool> isMidiLoaded{ false };
+    std::atomic<bool> isPlayingMidi{ false };
 
     bool isLooping = false;
     bool isStretchEnabled = false;
