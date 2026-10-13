@@ -251,10 +251,22 @@ MainComponent::MainComponent()
         juce::PopupMenu menu;
         menu.addItem(1, juce::String::fromUTF8("Configuraci\303\263n de audio..."));
         menu.addSeparator();
+        const bool hasActiveSearch = searchBar.getText().trim().isNotEmpty()
+            || bpmBox.getText().trim().isNotEmpty()
+            || keyBox.getSelectedId() != 1
+            || typeBox.getSelectedId() != 1
+            || categoryBox.getSelectedId() != 1
+            || favFilterButton.getToggleState();
+
         menu.addItem(2, juce::String::fromUTF8("Analizar carpeta ra\303\255z y todas sus subcarpetas"), !batchRunning);
-        menu.addItem(3, batchControl && batchControl->paused.load()
+        menu.addItem(3, juce::String::fromUTF8("Analizar carpeta seleccionada y subcarpetas"),
+                     !batchRunning && directoryTree.getSelectedFile().isDirectory());
+        menu.addItem(4, juce::String::fromUTF8("Analizar resultados de b\303\272squeda actual"),
+                     !batchRunning && hasActiveSearch);
+        menu.addSeparator();
+        menu.addItem(5, batchControl && batchControl->paused.load()
                             ? juce::String::fromUTF8("Reanudar an\303\241lisis") : juce::String::fromUTF8("Pausar an\303\241lisis"), batchRunning);
-        menu.addItem(4, juce::String::fromUTF8("Cancelar an\303\241lisis"), batchRunning);
+        menu.addItem(6, juce::String::fromUTF8("Cancelar an\303\241lisis"), batchRunning);
 
         juce::Component::SafePointer<MainComponent> safeThis(this);
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&settingsButton),
@@ -277,9 +289,11 @@ MainComponent::MainComponent()
                 options.resizable = false;
                 options.launchAsync();
             }
-            else if (choice == 2) safeThis->startBatchAnalysis();
-            else if (choice == 3) safeThis->pauseOrResumeBatchAnalysis();
-            else if (choice == 4) safeThis->cancelBatchAnalysis();
+            else if (choice == 2) safeThis->startBatchAnalysis(BatchScope::Root);
+            else if (choice == 3) safeThis->startBatchAnalysis(BatchScope::SelectedFolder);
+            else if (choice == 4) safeThis->startBatchAnalysis(BatchScope::SearchResults);
+            else if (choice == 5) safeThis->pauseOrResumeBatchAnalysis();
+            else if (choice == 6) safeThis->cancelBatchAnalysis();
         });
     };
 
@@ -1172,22 +1186,47 @@ void MainComponent::analyzeBPM(const juce::File& file)
 }
 
 // El usuario puede seguir navegando, buscando y reproduciendo durante todo el lote.
-void MainComponent::startBatchAnalysis()
+void MainComponent::startBatchAnalysis(BatchScope scope)
 {
     if (batchRunning) return;
 
-    if (lastSelectedFolder.isEmpty())
+    juce::File root;
+    std::vector<juce::File> searchFiles;
+    if (scope == BatchScope::SearchResults)
     {
-        juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
-            juce::String::fromUTF8("An\303\241lisis de librer\303\255as"), juce::String::fromUTF8("Primero selecciona una carpeta ra\303\255z v\303\241lida."));
-        return;
+        // Actualiza la búsqueda si el debounce de 120ms aún no terminó.
+        if (filterInputPending)
+        {
+            filterInputPending = false;
+            applyFilters();
+        }
+
+        // Congelamos los resultados visibles, incluyendo todos los filtros y Favs.
+        for (const auto& file : filteredAudioFiles)
+            if (file.hasFileExtension(".wav;.mp3;.aif;.aiff"))
+                searchFiles.push_back(file);
+
+        if (searchFiles.empty())
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
+                juce::String::fromUTF8("An\303\241lisis de librer\303\255as"),
+                juce::String::fromUTF8("La b\303\272squeda actual no contiene archivos de audio."));
+            return;
+        }
     }
-    const juce::File root(lastSelectedFolder);
-    if (!root.isDirectory())
+    else
     {
-        juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
-            juce::String::fromUTF8("An\303\241lisis de librer\303\255as"), juce::String::fromUTF8("La carpeta ra\303\255z ya no existe."));
-        return;
+        root = scope == BatchScope::Root ? juce::File(lastSelectedFolder)
+                                         : directoryTree.getSelectedFile();
+        if ((scope == BatchScope::Root && lastSelectedFolder.isEmpty()) || !root.isDirectory())
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+                juce::String::fromUTF8("An\303\241lisis de librer\303\255as"),
+                scope == BatchScope::Root
+                    ? juce::String::fromUTF8("Selecciona una carpeta ra\303\255z v\303\241lida antes de analizar.")
+                    : juce::String::fromUTF8("Selecciona una carpeta en el \303\241rbol de carpetas."));
+            return;
+        }
     }
 
     const int generation = ++batchGeneration;
@@ -1195,15 +1234,18 @@ void MainComponent::startBatchAnalysis()
     batchControl = control;
     batchRunning = true;
     lastBatchPersistAt = juce::Time::getMillisecondCounter();
-    batchStatusLabel.setText("Analizando: buscando archivos...", juce::dontSendNotification);
+    batchStatusLabel.setText(scope == BatchScope::SearchResults
+        ? juce::String::fromUTF8("Analizando b\303\272squeda: preparando resultados...")
+        : "Analizando: buscando archivos...", juce::dontSendNotification);
 
     // Copias de datos: el trabajador nunca leerá bases ni controles de la interfaz.
     const auto rules = learnedPatternsDatabase;
     const auto analyzedPaths = bpmDatabase.getAllKeys();
     juce::Component::SafePointer<MainComponent> safeThis(this);
 
-    batchPool.addJob(new BackgroundTask("Index and analyze entire sample library",
-        [root, rules, analyzedPaths, control, generation, safeThis](BackgroundTask& job)
+    batchPool.addJob(new BackgroundTask("Analyze selected sample scope",
+        [root, scope, searchFiles = std::move(searchFiles),
+         rules, analyzedPaths, control, generation, safeThis](BackgroundTask& job)
     {
         const auto stopped = [&job, &control]()
         {
@@ -1227,29 +1269,32 @@ void MainComponent::startBatchAnalysis()
             });
         };
 
-        // Indexamos solo WAV/MP3/AIF/AIFF. MIDI no requiere BPM ni detección de key.
-        std::vector<juce::File> files;
-        std::vector<juce::File> folders { root };
-        std::unordered_set<std::string> visited;
-        while (!folders.empty() && !stopped())
+        // La búsqueda analiza los resultados capturados al iniciar, aunque luego
+        // cambien las carpetas y los filtros. Otros modos recorren su carpeta elegida.
+        std::vector<juce::File> files = std::move(searchFiles);
+        if (scope != BatchScope::SearchResults)
         {
-            if (!waitForTurn()) break;
-            auto folder = folders.back();
-            folders.pop_back();
-            if (!visited.insert(folder.getFullPathName().toLowerCase().toStdString()).second)
-                continue;
-
-            juce::DirectoryIterator iterator(folder, false, "*", juce::File::findFilesAndDirectories);
-            while (iterator.next() && !stopped())
+            std::vector<juce::File> folders { root };
+            std::unordered_set<std::string> visited;
+            while (!folders.empty() && !stopped())
             {
-                const auto child = iterator.getFile();
-                if (child.isDirectory())
+                if (!waitForTurn()) break;
+                auto folder = folders.back();
+                folders.pop_back();
+                if (!visited.insert(folder.getFullPathName().toLowerCase().toStdString()).second)
+                    continue;
+
+                juce::DirectoryIterator iterator(folder, false, "*", juce::File::findFilesAndDirectories);
+                while (iterator.next() && !stopped())
                 {
-                    // No seguir enlaces/junctions que puedan formar ciclos o salir de la librería.
-                    if (!child.isSymbolicLink()) folders.push_back(child);
+                    const auto child = iterator.getFile();
+                    if (child.isDirectory())
+                    {
+                        if (!child.isSymbolicLink()) folders.push_back(child);
+                    }
+                    else if (child.hasFileExtension(".wav;.mp3;.aif;.aiff"))
+                        files.push_back(child);
                 }
-                else if (child.hasFileExtension(".wav;.mp3;.aif;.aiff"))
-                    files.push_back(child);
             }
         }
 
