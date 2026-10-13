@@ -146,6 +146,7 @@ private:
     juce::String extractKeyFromName(const juce::String& fileName); // <-- Nuevo extractor
 
     // {* NUEVO: Rastreadores de estado para el render offline *}
+    juce::File currentlyPreviewedFile;
     double currentPitchSemitones = 0.0;
     double currentTempoMultiplier = 1.0;
     bool isStretchEnabled = false;

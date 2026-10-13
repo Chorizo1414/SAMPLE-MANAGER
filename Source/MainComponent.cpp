@@ -753,6 +753,21 @@ void MainComponent::previewAudio(const juce::File& file)
     if (batchControl) batchControl->playbackActive.store(true);
     waveformDisplay.setAudioFile(file);
     audioPlayer.loadFile(file);
+
+    // Siempre restablecer los ajustes del sample anterior ANTES de reproducir.
+    currentlyPreviewedFile = file;
+    const juce::String path = file.getFullPathName();
+    juce::String sourceBpm = bpmLookup.contains(path) ? bpmLookup[path]
+                                 : extractBPMFromName(file.getFileName());
+    juce::String sourceKey = keyLookup.contains(path) ? keyLookup[path]
+                                 : extractKeyFromName(file.getFileName());
+    if (file.hasFileExtension(".mid"))
+    {
+        // No se inventa el tempo ni la tonalidad para partituras MIDI.
+        sourceBpm = "--";
+        sourceKey = "--";
+    }
+    transportControls.setSourceMetadata(sourceBpm, sourceKey);
     audioPlayer.play();
 
     if (file.hasFileExtension(".mid") || bpmLookup.contains(file.getFullPathName()))
@@ -1157,6 +1172,8 @@ void MainComponent::analyzeBPM(const juce::File& file)
             safeThis->bpmLookup.set(path, result.bpm);
             safeThis->keyLookup.set(path, result.key);
             safeThis->categoryLookup.set(path, result.category);
+            if (safeThis->currentlyPreviewedFile == file)
+                safeThis->transportControls.updateDetectedMetadata(result.bpm, result.key);
             const int baseRow = safeThis->matchingAudioFiles.indexOf(file);
             if (baseRow >= 0)
             {
@@ -1335,6 +1352,9 @@ void MainComponent::startBatchAnalysis(BatchScope scope)
                     safeThis->bpmLookup.set(path, item.analysis.bpm);
                     safeThis->keyLookup.set(path, item.analysis.key);
                     safeThis->categoryLookup.set(path, item.analysis.category);
+                    if (safeThis->currentlyPreviewedFile == item.file)
+                        safeThis->transportControls.updateDetectedMetadata(item.analysis.bpm,
+                                                                          item.analysis.key);
                     changed = true;
                 }
                 if (changed) safeThis->saveDatabase();
