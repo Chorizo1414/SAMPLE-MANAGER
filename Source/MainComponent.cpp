@@ -2,6 +2,8 @@
 #include <functional>
 #include <memory>
 #include <utility>
+#include <unordered_set>
+#include <vector>
 
 namespace
 {
@@ -27,9 +29,16 @@ struct AudioAnalysisResult
     juce::String bpm, key, category;
 };
 
+struct BatchCompletedResult
+{
+    juce::File file;
+    AudioAnalysisResult analysis;
+};
+
 AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::File& file,
                                              const juce::StringPairArray& learnedPatterns,
-                                             const juce::String& nameBPM)
+                                             const juce::String& nameBPM,
+                                             const std::shared_ptr<SampleBatchControl>& batch = nullptr)
 {
     AudioAnalysisResult result;
     juce::AudioFormatManager formatManager;
@@ -57,7 +66,18 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
 
         while (samplesRead < numSamplesToRead)
         {
-            if (job.shouldExit()) return result;
+            if (job.shouldExit() || (batch && batch->cancelRequested.load())) return result;
+
+            // El análisis masivo cede el procesador durante reproducciones y pausas.
+            if (batch && (samplesRead / hopSize) % 16 == 0)
+            {
+                while ((batch->paused.load() || batch->playbackActive.load())
+                       && !batch->cancelRequested.load() && !job.shouldExit())
+                    juce::Thread::sleep(40);
+
+                if (job.shouldExit() || batch->cancelRequested.load()) return result;
+            }
+
             int samplesToGet = (int)juce::jmin((juce::int64)hopSize, numSamplesToRead - samplesRead);
             buffer.clear();
             reader->read(&buffer, 0, samplesToGet, samplesRead, true, true);
@@ -211,20 +231,49 @@ MainComponent::MainComponent()
     // {* NUEVO: Configuramos el botón de Audio *}
     addAndMakeVisible(settingsButton);
     settingsButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2c313a));
-    settingsButton.onClick = [this] {
-        // Invocamos el panel nativo de JUCE para tarjetas de sonido
-        auto* audioSettings = new juce::AudioDeviceSelectorComponent(deviceManager, 0, 0, 0, 2, false, false, true, false);
-        audioSettings->setSize(500, 400);
+    settingsButton.setButtonText("Configuración y análisis");
+    addAndMakeVisible(batchStatusLabel);
+    batchStatusLabel.setColour(juce::Label::textColourId, juce::Colour(0xff56b6c2));
+    batchStatusLabel.setJustificationType(juce::Justification::centredLeft);
+    batchStatusLabel.setFont(juce::Font(12.0f));
+    batchStatusLabel.setText("Análisis: disponible desde Configuración", juce::dontSendNotification);
 
-        juce::DialogWindow::LaunchOptions options;
-        options.content.setOwned(audioSettings);
-        options.dialogTitle = "Configuracion de Audio";
-        options.dialogBackgroundColour = juce::Colour(0xff181a1f);
-        options.escapeKeyTriggersCloseButton = true;
-        options.useNativeTitleBar = true;
-        options.resizable = false;
-        options.launchAsync();
-        };
+    settingsButton.onClick = [this]
+    {
+        juce::PopupMenu menu;
+        menu.addItem(1, "Configuración de audio...");
+        menu.addSeparator();
+        menu.addItem(2, "Analizar carpeta raíz y todas sus subcarpetas", !batchRunning);
+        menu.addItem(3, batchControl && batchControl->paused.load()
+                            ? "Reanudar análisis" : "Pausar análisis", batchRunning);
+        menu.addItem(4, "Cancelar análisis", batchRunning);
+
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&settingsButton),
+            [safeThis](int choice)
+        {
+            if (safeThis == nullptr) return;
+
+            if (choice == 1)
+            {
+                auto* audioSettings = new juce::AudioDeviceSelectorComponent(
+                    safeThis->deviceManager, 0, 0, 0, 2, false, false, true, false);
+                audioSettings->setSize(500, 400);
+
+                juce::DialogWindow::LaunchOptions options;
+                options.content.setOwned(audioSettings);
+                options.dialogTitle = "Configuración de Audio";
+                options.dialogBackgroundColour = juce::Colour(0xff181a1f);
+                options.escapeKeyTriggersCloseButton = true;
+                options.useNativeTitleBar = true;
+                options.resizable = false;
+                options.launchAsync();
+            }
+            else if (choice == 2) safeThis->startBatchAnalysis();
+            else if (choice == 3) safeThis->pauseOrResumeBatchAnalysis();
+            else if (choice == 4) safeThis->cancelBatchAnalysis();
+        });
+    };
 
     // {* NUEVO: Botón para elegir la carpeta de samples *}
     addAndMakeVisible(chooseFolderButton);
@@ -367,6 +416,8 @@ MainComponent::~MainComponent()
 {
     juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
 
+    if (batchControl) batchControl->cancelRequested.store(true);
+    batchPool.removeAllJobs(true, 10000);
     scanPool.removeAllJobs(true, 10000);
     analysisPool.removeAllJobs(true, 10000);
     // Al cerrar no se pierden cambios que seguían pendientes en memoria.
@@ -418,7 +469,8 @@ void MainComponent::resized()
     chooseFolderButton.setBounds(0, 0, 300, 30);
 
     // 2. El árbol de carpetas en medio
-    directoryTree.setBounds(0, 30, 300, getHeight() - 30 - 45);
+    directoryTree.setBounds(0, 30, 300, getHeight() - 30 - 72);
+    batchStatusLabel.setBounds(10, getHeight() - 65, 280, 24);
     settingsButton.setBounds(10, getHeight() - 35, 280, 26);
 
     int topMargin = 15;
@@ -672,6 +724,8 @@ void MainComponent::previewAudio(const juce::File& file)
     pendingAnalysisFile = juce::File();
     analysisPool.removeAllJobs(true, 0);
 
+    previewPauseUntil = juce::Time::getMillisecondCounter() + 800;
+    if (batchControl) batchControl->playbackActive.store(true);
     waveformDisplay.setAudioFile(file);
     audioPlayer.loadFile(file);
     audioPlayer.play();
@@ -1204,8 +1258,21 @@ void MainComponent::timerCallback()
 {
     const auto now = juce::Time::getMillisecondCounter();
 
-    if (databaseSavePending && now - databaseSaveRequestedAt >= 650)
+    // Un guardado periódico cada 10 s protege lo completado sin escribir XML
+    // después de cada resultado; fuera del lote mantenemos 650 ms.
+    if (databaseSavePending &&
+        ((batchRunning && now - lastBatchPersistAt >= 10000)
+         || (!batchRunning && now - databaseSaveRequestedAt >= 650)))
+    {
+        lastBatchPersistAt = now;
         flushDatabaseSave();
+    }
+
+    if (batchControl)
+    {
+        const bool grace = static_cast<juce::int32>(previewPauseUntil - now) > 0;
+        batchControl->playbackActive.store(grace || audioPlayer.getTransportSource().isPlaying());
+    }
 
     if (pendingAnalysisFile != juce::File() && now - pendingAnalysisRequestedAt >= 450)
     {
