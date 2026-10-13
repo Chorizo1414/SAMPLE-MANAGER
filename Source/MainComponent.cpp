@@ -1481,7 +1481,10 @@ void MainComponent::timerCallback()
     if (batchControl)
     {
         const bool grace = static_cast<juce::int32>(previewPauseUntil - now) > 0;
-        batchControl->playbackActive.store(grace || audioPlayer.isPreviewPlaying());
+        // La escucha y el análisis bajo demanda tienen prioridad sobre el lote.
+        const bool previewNeedsCPU = pendingAnalysisFile != juce::File()
+                                     || analysisPool.getNumJobs() > 0;
+        batchControl->playbackActive.store(grace || audioPlayer.isPreviewPlaying() || previewNeedsCPU);
     }
 
     if (pendingAnalysisFile != juce::File() && now - pendingAnalysisRequestedAt >= 450)
