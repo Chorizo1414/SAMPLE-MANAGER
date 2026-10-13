@@ -838,32 +838,46 @@ void MainComponent::applyFilters()
     filteredBPMs.clear();
     filteredKeys.clear();
     filteredCategories.clear();
-    filteredFavorites.clear(); // Limpiamos la memoria de estrellas
+    filteredFavorites.clear();
 
-    bool showOnlyFavorites = favFilterButton.getToggleState();
-
-    juce::String searchText = searchBar.getText().toLowerCase();
-    juce::String bpmText = bpmBox.getText().toLowerCase();
-
-    bool isAllKeys = (keyBox.getSelectedId() == 1);
-    juce::String selectedKey = isAllKeys ? "" : keyBox.getText().toLowerCase();
-
-    juce::String note = "";
-    juce::String scale = "";
+    const bool showOnlyFavorites = favFilterButton.getToggleState();
+    const juce::String searchText = searchBar.getText().toLowerCase();
+    const juce::String bpmText = bpmBox.getText().toLowerCase();
+    const bool isAllKeys = keyBox.getSelectedId() == 1;
+    const juce::String selectedKey = isAllKeys ? "" : keyBox.getText().toLowerCase();
+    juce::String note, scale;
     if (!isAllKeys)
     {
         note = selectedKey.upToFirstOccurrenceOf(" ", false, false).trim();
         scale = selectedKey.fromFirstOccurrenceOf(" ", false, false).trim();
     }
 
-    int typeFilter = typeBox.getSelectedId();
-    int catFilter = categoryBox.getSelectedId(); // 1:Todos, 2:Loops, 3:OneShots, 4:Samples
+    // Se calculan una sola vez por búsqueda, no por cada archivo.
+    const juce::String key1 = note + " " + scale;
+    const juce::String key2 = note + scale;
+    const juce::String key3 = note + "_" + scale;
+    const juce::String key4 = note + "-" + scale;
+    const auto learnedKeywords = learnedPatternsDatabase.getAllKeys();
+    const int typeFilter = typeBox.getSelectedId();
+    const int catFilter = categoryBox.getSelectedId();
 
-    for (auto& file : audioFilesInFolder)
+    for (const auto& file : audioFilesInFolder)
     {
-        juce::String fileName = file.getFileName().toLowerCase();
-        bool isMidi = file.hasFileExtension(".mid");
-        juce::String filePath = file.getFullPathName();
+        const juce::String fileName = file.getFileName().toLowerCase();
+
+        // Filtros baratos primero: descartamos archivos no coincidentes antes de clasificarlos.
+        if (searchText.isNotEmpty() && !fileName.contains(searchText)) continue;
+        if (bpmText.isNotEmpty() && !fileName.contains(bpmText)) continue;
+        if (!isAllKeys && !fileName.contains(key1) && !fileName.contains(key2)
+            && !fileName.contains(key3) && !fileName.contains(key4)) continue;
+
+        const bool isMidi = file.hasFileExtension(".mid");
+        if (typeFilter == 2 && isMidi) continue;
+        if (typeFilter == 3 && !isMidi) continue;
+
+        const juce::String filePath = file.getFullPathName();
+        const bool isFav = favoritesDatabase[filePath] == "1";
+        if (showOnlyFavorites && !isFav) continue;
 
         // Extraemos la categoría
         juce::String currentCat = categoryDatabase.containsKey(filePath) ? categoryDatabase[filePath] : "--";
@@ -872,7 +886,7 @@ void MainComponent::applyFilters()
             juce::String parentFolder = file.getParentDirectory().getFileName().toLowerCase();
 
             // {* CONSULTA AL MOTOR DE APRENDIZAJE AUTÓNOMO *}
-            for (auto& keyword : learnedPatternsDatabase.getAllKeys())
+            for (const auto& keyword : learnedKeywords)
             {
                 if (parentFolder.contains(keyword.toLowerCase()))
                 {
@@ -899,48 +913,23 @@ void MainComponent::applyFilters()
 
         if (isMidi) currentCat = "MIDI";
 
-        // {* NUEVO: EL ESCUDO DEL FILTRO DE ESTRELLA *}
-        bool isFav = (favoritesDatabase[filePath] == "1");
-        if (showOnlyFavorites && !isFav) continue; // Si el botón está presionado y no es favorito, se salta este sample
+        if (catFilter == 2 && currentCat != "LOOP") continue;
+        if (catFilter == 3 && currentCat != "ONE SHOT") continue;
+        if (catFilter == 4 && currentCat != "SAMPLE") continue;
 
-        bool matchesType = true;
-        if (typeFilter == 2 && isMidi) matchesType = false;
-        if (typeFilter == 3 && !isMidi) matchesType = false;
+        filteredAudioFiles.add(file);
+        filteredCategories.add(currentCat);
+        filteredFavorites.add(isFav);
 
-        // Evaluamos el filtro de Categoría
-        bool matchesCat = true;
-        if (catFilter == 2 && currentCat != "LOOP") matchesCat = false;
-        if (catFilter == 3 && currentCat != "ONE SHOT") matchesCat = false;
-        if (catFilter == 4 && currentCat != "SAMPLE") matchesCat = false;
-
-        bool matchesText = searchText.isEmpty() || fileName.contains(searchText);
-        bool matchesBpm = bpmText.isEmpty() || fileName.contains(bpmText);
-
-        bool matchesKey = true;
-        if (!isAllKeys)
+        if (bpmDatabase.containsKey(filePath))
         {
-            juce::String var1 = note + " " + scale;
-            juce::String var2 = note + scale;
-            juce::String var3 = note + "_" + scale;
-            juce::String var4 = note + "-" + scale;
-            if (!fileName.contains(var1) && !fileName.contains(var2) && !fileName.contains(var3) && !fileName.contains(var4))
-                matchesKey = false;
+            filteredBPMs.add(bpmDatabase[filePath]);
+            filteredKeys.add(keyDatabase[filePath]);
         }
-
-        if (matchesText && matchesBpm && matchesKey && matchesType && matchesCat)
+        else
         {
-            filteredAudioFiles.add(file);
-            filteredCategories.add(currentCat);
-            filteredFavorites.add(isFav);       // Sincronizamos la estrella visual
-
-            if (bpmDatabase.containsKey(filePath)) {
-                filteredBPMs.add(bpmDatabase[filePath]);
-                filteredKeys.add(keyDatabase[filePath]);
-            }
-            else {
-                filteredBPMs.add(extractBPMFromName(fileName));
-                filteredKeys.add(extractKeyFromName(fileName));
-            }
+            filteredBPMs.add(extractBPMFromName(fileName));
+            filteredKeys.add(extractKeyFromName(fileName));
         }
     }
 
