@@ -192,10 +192,18 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
             }
         }
 
-        if (nameBPM != "--" && audioType == "LOOP")
+        // El trabajador de lote calcula el BPM del nombre sin acceder a MainComponent.
+        juce::String inferredBPM = nameBPM;
+        if (inferredBPM.isEmpty())
         {
-            detectedBPM = nameBPM.getDoubleValue();
+            static const std::regex bpmPattern("([0-9]{2,3})\\s*bp");
+            std::smatch match;
+            const std::string lowercaseName = file.getFileName().toLowerCase().toStdString();
+            inferredBPM = std::regex_search(lowercaseName, match, bpmPattern)
+                              ? juce::String(match[1].str()) : "--";
         }
+        if (inferredBPM != "--" && audioType == "LOOP")
+            detectedBPM = inferredBPM.getDoubleValue();
 
 
     result.valid = true;
@@ -1158,6 +1166,195 @@ void MainComponent::analyzeBPM(const juce::File& file)
             safeThis->saveDatabase();
         });
     }), true);
+}
+
+// El usuario puede seguir navegando, buscando y reproduciendo durante todo el lote.
+void MainComponent::startBatchAnalysis()
+{
+    if (batchRunning) return;
+
+    const juce::File root(lastSelectedFolder);
+    if (lastSelectedFolder.isEmpty() || !root.isDirectory())
+    {
+        juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+            "Análisis de librerías", "Primero selecciona una carpeta raíz válida.");
+        return;
+    }
+
+    const int generation = ++batchGeneration;
+    auto control = std::make_shared<SampleBatchControl>();
+    batchControl = control;
+    batchRunning = true;
+    lastBatchPersistAt = juce::Time::getMillisecondCounter();
+    batchStatusLabel.setText("Analizando: buscando archivos...", juce::dontSendNotification);
+
+    // Copias de datos: el trabajador nunca leerá bases ni controles de la interfaz.
+    const auto rules = learnedPatternsDatabase;
+    const auto analyzedPaths = bpmDatabase.getAllKeys();
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+
+    batchPool.addJob(new BackgroundTask("Index and analyze entire sample library",
+        [root, rules, analyzedPaths, control, generation, safeThis](BackgroundTask& job)
+    {
+        const auto stopped = [&job, &control]()
+        {
+            return job.shouldExit() || control->cancelRequested.load();
+        };
+
+        // La pausa manual y la reproducción se comprueban también mientras se buscan archivos.
+        const auto waitForTurn = [&stopped, &control]()
+        {
+            while ((control->paused.load() || control->playbackActive.load()) && !stopped())
+                juce::Thread::sleep(40);
+            return !stopped();
+        };
+
+        const auto report = [safeThis, generation](const juce::String& message)
+        {
+            juce::MessageManager::callAsync([safeThis, generation, message]()
+            {
+                if (safeThis != nullptr && safeThis->batchGeneration == generation && safeThis->batchRunning)
+                    safeThis->batchStatusLabel.setText(message, juce::dontSendNotification);
+            });
+        };
+
+        // Indexamos solo WAV/MP3/AIF/AIFF. MIDI no requiere BPM ni detección de key.
+        std::vector<juce::File> files;
+        std::vector<juce::File> folders { root };
+        std::unordered_set<std::string> visited;
+        while (!folders.empty() && !stopped())
+        {
+            if (!waitForTurn()) break;
+            auto folder = folders.back();
+            folders.pop_back();
+            if (!visited.insert(folder.getFullPathName().toLowerCase().toStdString()).second)
+                continue;
+
+            juce::DirectoryIterator iterator(folder, false, "*", juce::File::findFilesAndDirectories);
+            while (iterator.next() && !stopped())
+            {
+                const auto child = iterator.getFile();
+                if (child.isDirectory())
+                {
+                    // No seguir enlaces/junctions que puedan formar ciclos o salir de la librería.
+                    if (!child.isSymbolicLink()) folders.push_back(child);
+                }
+                else if (child.hasFileExtension(".wav;.mp3;.aif;.aiff"))
+                    files.push_back(child);
+            }
+        }
+
+        const int total = static_cast<int>(files.size());
+        int done = 0, skipped = 0, analyzed = 0, failed = 0;
+        std::vector<BatchCompletedResult> completed;
+        completed.reserve(8);
+        auto lastReport = juce::Time::getMillisecondCounter();
+
+        // Se envían pequeños grupos completos al hilo UI; solo él modifica el XML/cache.
+        const auto postCompleted = [&completed, safeThis]()
+        {
+            if (completed.empty()) return;
+            auto ready = std::move(completed);
+            completed.clear();
+            juce::MessageManager::callAsync([safeThis, ready = std::move(ready)]()
+            {
+                if (safeThis == nullptr) return;
+                bool changed = false;
+                for (const auto& item : ready)
+                {
+                    const auto path = item.file.getFullPathName();
+                    // Puede haberse analizado en la vista previa o editado manualmente.
+                    if (safeThis->bpmLookup.contains(path)) continue;
+                    safeThis->bpmDatabase.set(path, item.analysis.bpm);
+                    safeThis->keyDatabase.set(path, item.analysis.key);
+                    safeThis->categoryDatabase.set(path, item.analysis.category);
+                    safeThis->bpmLookup.set(path, item.analysis.bpm);
+                    safeThis->keyLookup.set(path, item.analysis.key);
+                    safeThis->categoryLookup.set(path, item.analysis.category);
+                    changed = true;
+                }
+                if (changed) safeThis->saveDatabase();
+            });
+        };
+
+        if (!stopped())
+        {
+            report("Análisis: 0 / " + juce::String(total) + " archivos");
+            std::unordered_set<std::string> known;
+            known.reserve(static_cast<size_t>(analyzedPaths.size()) + 64);
+            for (const auto& path : analyzedPaths)
+                known.insert(path.toLowerCase().toStdString());
+
+            for (const auto& file : files)
+            {
+                if (stopped() || !waitForTurn()) break;
+                const auto path = file.getFullPathName();
+                if (known.find(path.toLowerCase().toStdString()) != known.end())
+                    ++skipped;
+                else
+                {
+                    // La misma función que usa la vista previa; evita resultados incompatibles.
+                    const auto result = analyzeAudioInBackground(job, file, rules, {}, control);
+                    if (stopped()) break;
+                    if (result.valid)
+                    {
+                        completed.push_back({ file, result });
+                        ++analyzed;
+                    }
+                    else ++failed;
+                }
+                ++done;
+                const auto now = juce::Time::getMillisecondCounter();
+                if (completed.size() >= 8 || now - lastReport >= 2000)
+                    postCompleted();
+
+                if (now - lastReport >= 850)
+                {
+                    report("Análisis: " + juce::String(done) + "/" + juce::String(total)
+                           + " (" + juce::String(total > 0 ? (done * 100 / total) : 100)
+                           + "%) | Nuevos: " + juce::String(analyzed));
+                    lastReport = now;
+                }
+            }
+        }
+
+        // Incluso tras Cancelar: los resultados ya terminados se entregan y guardan.
+        postCompleted();
+        const bool wasCancelled = stopped();
+        juce::MessageManager::callAsync([safeThis, generation, wasCancelled, done, total, analyzed, skipped, failed]()
+        {
+            if (safeThis == nullptr || safeThis->batchGeneration != generation) return;
+            safeThis->batchRunning = false;
+            safeThis->batchControl.reset();
+            const auto summary = (wasCancelled ? "Cancelado: " : "Finalizado: ")
+                + juce::String(done) + "/" + juce::String(total)
+                + " | Nuevos " + juce::String(analyzed)
+                + ", omitidos " + juce::String(skipped)
+                + ", errores " + juce::String(failed);
+            safeThis->batchStatusLabel.setText(summary, juce::dontSendNotification);
+            // No esperamos al timer para persistir el último grupo de resultados.
+            safeThis->flushDatabaseSave();
+            // Refrescamos la lista visible una sola vez; nunca después de cada archivo.
+            safeThis->applyFilters();
+        });
+    }), true);
+}
+
+void MainComponent::pauseOrResumeBatchAnalysis()
+{
+    if (!batchRunning || !batchControl || batchControl->cancelRequested.load()) return;
+    const bool paused = !batchControl->paused.load();
+    batchControl->paused.store(paused);
+    batchStatusLabel.setText(paused ? "Análisis pausado (Config. para reanudar)"
+                                    : "Análisis reanudado...", juce::dontSendNotification);
+}
+
+void MainComponent::cancelBatchAnalysis()
+{
+    if (!batchRunning || !batchControl) return;
+    batchControl->cancelRequested.store(true);
+    batchStatusLabel.setText("Cancelando... se guardarán los archivos terminados.",
+                             juce::dontSendNotification);
 }
 
 void MainComponent::loadDatabase()
