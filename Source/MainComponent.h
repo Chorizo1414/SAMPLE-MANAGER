@@ -76,7 +76,8 @@ private:
     int batchGeneration = 0;
     juce::uint32 lastBatchPersistAt = 0;
     juce::uint32 previewPauseUntil = 0;
-    void startBatchAnalysis();
+    enum class BatchScope { Root, SelectedFolder, SearchResults };
+    void startBatchAnalysis(BatchScope scope);
     void pauseOrResumeBatchAnalysis();
     void cancelBatchAnalysis();
     int scanGeneration = 0;
