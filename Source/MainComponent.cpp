@@ -1173,11 +1173,17 @@ void MainComponent::startBatchAnalysis()
 {
     if (batchRunning) return;
 
-    const juce::File root(lastSelectedFolder);
-    if (lastSelectedFolder.isEmpty() || !root.isDirectory())
+    if (lastSelectedFolder.isEmpty())
     {
         juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
             "Análisis de librerías", "Primero selecciona una carpeta raíz válida.");
+        return;
+    }
+    const juce::File root(lastSelectedFolder);
+    if (!root.isDirectory())
+    {
+        juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon,
+            "Análisis de librerías", "La carpeta raíz ya no existe.");
         return;
     }
 
@@ -1249,6 +1255,7 @@ void MainComponent::startBatchAnalysis()
         std::vector<BatchCompletedResult> completed;
         completed.reserve(8);
         auto lastReport = juce::Time::getMillisecondCounter();
+        auto lastFlush = lastReport;
 
         // Se envían pequeños grupos completos al hilo UI; solo él modifica el XML/cache.
         const auto postCompleted = [&completed, safeThis]()
@@ -1305,8 +1312,11 @@ void MainComponent::startBatchAnalysis()
                 }
                 ++done;
                 const auto now = juce::Time::getMillisecondCounter();
-                if (completed.size() >= 8 || now - lastReport >= 2000)
+                if (completed.size() >= 8 || now - lastFlush >= 2500)
+                {
                     postCompleted();
+                    lastFlush = now;
+                }
 
                 if (now - lastReport >= 850)
                 {
