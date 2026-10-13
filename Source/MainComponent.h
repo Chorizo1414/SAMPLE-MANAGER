@@ -55,9 +55,9 @@ private:
     juce::String lastSelectedFolder;
     juce::TimeSliceThread directoryThread{ "Directory Thread" };
     // Las tareas de disco y de análisis no deben bloquear la interfaz de audio.
-    juce::ThreadPool scanPool{ 1 };
-    juce::ThreadPool analysisPool{ 1 };
-    juce::ThreadPool databaseWritePool{ 1 };
+    juce::ThreadPool scanPool{ 1, juce::Thread::osDefaultStackSize, juce::Thread::Priority::low };
+    juce::ThreadPool analysisPool{ 1, juce::Thread::osDefaultStackSize, juce::Thread::Priority::low };
+    juce::ThreadPool databaseWritePool{ 1, juce::Thread::osDefaultStackSize, juce::Thread::Priority::low };
     int scanGeneration = 0;
     bool filterInputPending = false;
     juce::uint32 lastFilterInputTime = 0;
