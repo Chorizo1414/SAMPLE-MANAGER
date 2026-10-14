@@ -146,9 +146,7 @@
     <Lib/>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\Source\BTrack\BTrack.cpp"/>
-    <ClCompile Include="..\..\Source\BTrack\kiss_fft.c"/>
-    <ClCompile Include="..\..\Source\BTrack\OnsetDetectionFunction.cpp"/>
+    <ClCompile Include="..\..\Source\KissFFT\kiss_fft.c"/>
     <ClCompile Include="..\..\Source\SoundTouchAudioSource.cpp"/>
     <ClCompile Include="..\..\Source\SoundTouch\AAFilter.cpp"/>
     <ClCompile Include="..\..\Source\SoundTouch\BPMDetect.cpp"/>
@@ -2913,12 +2911,8 @@
   <ItemGroup>
     <ClInclude Include="..\..\Source\CustomTheme.h"/>
     <ClInclude Include="..\..\Source\KeyDetector.h"/>
-    <ClInclude Include="..\..\Source\BTrack\_kiss_fft_guts.h"/>
-    <ClInclude Include="..\..\Source\BTrack\BTrack.h"/>
-    <ClInclude Include="..\..\Source\BTrack\CircularBuffer.h"/>
-    <ClInclude Include="..\..\Source\BTrack\kiss_fft.h"/>
-    <ClInclude Include="..\..\Source\BTrack\kissfft.hh"/>
-    <ClInclude Include="..\..\Source\BTrack\OnsetDetectionFunction.h"/>
+    <ClInclude Include="..\..\Source\KissFFT\_kiss_fft_guts.h"/>
+    <ClInclude Include="..\..\Source\KissFFT\kiss_fft.h"/>
     <ClInclude Include="..\..\Source\SoundTouchAudioSource.h"/>
     <ClInclude Include="..\..\Source\SoundTouch\AAFilter.h"/>
     <ClInclude Include="..\..\Source\SoundTouch\BPMDetect.h"/>
