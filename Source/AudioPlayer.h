@@ -1,7 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include <atomic>
-#include "SoundTouchAudioSource.h" 
+#include "StretchAudioSource.h" 
 
 class AudioPlayer
 {
@@ -43,7 +43,7 @@ private:
 
     juce::AudioFormatManager formatManager;
     juce::AudioTransportSource transportSource;
-    SoundTouchAudioSource soundTouchSource{ &transportSource };
+    StretchAudioSource stretchSource{ &transportSource };
     juce::ResamplingAudioSource resamplerSource{ &soundTouchSource, false, 2 };
     std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
 
