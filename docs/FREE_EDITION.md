@@ -6,9 +6,9 @@
 
 ## Funciones Free que deben permanecer
 - Explorar carpetas y buscar samples, filtrarlos y marcar favoritos.
-- Reproducción de audio y MIDI con waveform, Stretch y ajustes musicales de Key/BPM.
+- Reproducción de audio y MIDI con waveform, Signalsmith Stretch (MIT) y ajustes musicales de Key/BPM.
 - Analizar carpeta raíz, carpeta seleccionada y resultados de búsqueda, en segundo plano y con pausa/cancelación.
-- BPM desde nombres de archivos; estimación SoundTouch cuando falta BPM.
+- BPM desde nombres de archivos; estimación propia con TempoDetector cuando falta BPM.
 - Tonalidad desde nombre o análisis con KeyDetector y Kiss FFT.
 - Corrección manual de BPM y restauración explícita de valores desde el nombre.
 - Arrastrar el archivo ORIGINAL a un DAW. Es intencional que los cambios de BPM y Key de la vista previa no se apliquen al archivo arrastrado.
@@ -23,7 +23,7 @@
 - [ ] Probar arrastre con audio original tras cambiar pitch y BPM; confirmar que el archivo sigue intacto.
 - [ ] Verificar reproducción, favoritos, búsqueda y análisis de BPM con nombres sin y con etiquetas.
 - [ ] Probar en otra máquina con Windows y otros dispositivos de audio.
-- [ ] Resolver las obligaciones LGPL de SoundTouch (actualmente compilado dentro del ejecutable) o conseguir licencia comercial; verificar compatibilidad con la licencia JUCE elegida.
+- [ ] Validar la nueva integración Signalsmith Stretch + Linear (MIT) y comprobar que no se distribuya SoundTouch ni BTrack. Incluir licencias MIT/BSD y verificar los términos JUCE 9 Starter.
 - [ ] Preparar avisos y licencias de terceros, y revisar docs/LICENSE_AUDIT.md.
 - [ ] Preparar ZIP/instalador, icono, documentación de usuario y página de descargas.
 
