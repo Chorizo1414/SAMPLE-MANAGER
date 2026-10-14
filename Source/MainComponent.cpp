@@ -729,6 +729,9 @@ void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
         menu.addItem(3, "Forzar como SAMPLE");
         menu.addSeparator();
         menu.addItem(4, "Corregir BPM manualmente...");
+        menu.addItem(5, "Restaurar BPM y tonalidad del nombre",
+                     extractBPMFromName(selectedAudioFile.getFileName()) != "--"
+                     || extractKeyFromName(selectedAudioFile.getFileName()) != "--");
 
         menu.showMenuAsync(juce::PopupMenu::Options(), [this, row, selectedAudioFile, filePath](int result)
             {
@@ -760,6 +763,36 @@ void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
                     }
 
                     fileList.repaintRow(row);
+                    saveDatabase();
+                    applyFilters();
+                }
+                else if (result == 5) // El usuario decide si reemplaza valores antiguos.
+                {
+                    const auto namedBpm = extractBPMFromName(selectedAudioFile.getFileName());
+                    const auto namedKey = extractKeyFromName(selectedAudioFile.getFileName());
+                    const auto nameLower = selectedAudioFile.getFileName().toLowerCase();
+
+                    if (namedBpm != "--")
+                    {
+                        bpmDatabase.set(filePath, namedBpm);
+                        bpmLookup.set(filePath, namedBpm);
+                        if (nameLower.contains("loop") || nameLower.contains("_ll_"))
+                        {
+                            categoryDatabase.set(filePath, "LOOP");
+                            categoryLookup.set(filePath, "LOOP");
+                        }
+                    }
+                    if (namedKey != "--")
+                    {
+                        keyDatabase.set(filePath, namedKey);
+                        keyLookup.set(filePath, namedKey);
+                    }
+
+                    if (currentlyPreviewedFile == selectedAudioFile)
+                        transportControls.updateDetectedMetadata(
+                            bpmLookup.contains(filePath) ? bpmLookup[filePath] : "--",
+                            keyLookup.contains(filePath) ? keyLookup[filePath] : "--");
+
                     saveDatabase();
                     applyFilters();
                 }
