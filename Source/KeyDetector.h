@@ -1,6 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
-#include "BTrack/kiss_fft.h"
+#include "KissFFT/kiss_fft.h"
 #include <vector>
 #include <cmath>
 
@@ -25,7 +25,7 @@ public:
         kiss_fft_free(fftCfg);
     }
 
-    // Recibe el mismo audio que ya le enviamos a BTrack
+    // Recibe los bloques de audio para analizar la tonalidad
     void processAudioFrame(const double* audioData, int numSamples)
     {
         for (int i = 0; i < numSamples; ++i) {
