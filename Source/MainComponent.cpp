@@ -23,6 +23,56 @@ private:
     std::function<void(BackgroundTask&)> work;
 };
 
+
+juce::String getBpmFromFilename(const juce::String& filename)
+{
+    const std::string name = filename.toLowerCase().toStdString();
+
+    // First prefer an explicit 120BPM/BPM120 label.
+    static const std::regex suffixBpm(R"((?:^|[^a-z0-9])([0-9]{2,3})\s*bpm?(?:$|[^a-z0-9]))");
+    static const std::regex prefixBpm(R"((?:^|[^a-z0-9])bpm[_\s-]*([0-9]{2,3})(?:$|[^a-z0-9]))");
+    // Libraries frequently name loops OS_RNB_125_Drum_Loop.wav without "BPM".
+    static const std::regex standaloneNumber(R"((?:^|[_\s-])([0-9]{2,3})(?:$|[_\s.-]))");
+    std::smatch match;
+    const auto validBpm = [](const std::smatch& m)
+    {
+        const int bpm = std::stoi(m[1].str());
+        return bpm >= 40 && bpm <= 240 ? juce::String(bpm) : juce::String();
+    };
+
+    if (std::regex_search(name, match, suffixBpm))
+    {
+        const auto bpm = validBpm(match);
+        if (bpm.isNotEmpty()) return bpm;
+    }
+    if (std::regex_search(name, match, prefixBpm))
+    {
+        const auto bpm = validBpm(match);
+        if (bpm.isNotEmpty()) return bpm;
+    }
+    for (auto it = std::sregex_iterator(name.begin(), name.end(), standaloneNumber);
+         it != std::sregex_iterator(); ++it)
+    {
+        const auto bpm = validBpm(*it);
+        if (bpm.isNotEmpty()) return bpm;
+    }
+    return "--";
+}
+
+juce::String getKeyFromFilename(const juce::String& filename)
+{
+    const std::string name = filename.toLowerCase().toStdString();
+    // Treat underscores as token separators: F#m_ and Dm_ must match too.
+    static const std::regex pattern(
+        R"((?:^|[^a-z0-9])([a-g][#b]?)\s*(minor|major|min|maj|m)(?:$|[^a-z0-9]))");
+    std::smatch match;
+    if (!std::regex_search(name, match, pattern)) return "--";
+
+    const juce::String note = juce::String(match[1].str()).toUpperCase();
+    const juce::String mode = juce::String(match[2].str());
+    return note + (mode == "m" || mode.startsWith("min") ? " Min" : " Maj");
+}
+
 struct AudioAnalysisResult
 {
     bool valid = false;
@@ -58,25 +108,11 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
         juce::HeapBlock<double> monoFrame(hopSize);
         juce::HeapBlock<soundtouch::SAMPLETYPE> bpmFrame(hopSize);
 
-        // Los metadatos explicitos en el nombre tienen prioridad sobre la estimacion.
-        static const std::regex bpmTagPattern("([0-9]{2,3})\\s*bp");
-        static const std::regex keyTagPattern("([a-g][#b]?)\\s*(min|maj|minor|major|m\\b)");
-        const std::string lowerName = file.getFileName().toLowerCase().toStdString();
-        std::smatch bpmMatch, keyMatch;
-
-        juce::String inferredBPM = nameBPM;
-        if (inferredBPM.isEmpty() || inferredBPM == "--")
-            inferredBPM = std::regex_search(lowerName, bpmMatch, bpmTagPattern)
-                            ? juce::String(bpmMatch[1].str()) : "--";
+        // El nombre tiene prioridad sobre la estimacion DSP.
+        const auto inferredBPM = nameBPM.isNotEmpty() && nameBPM != "--"
+                                   ? nameBPM : getBpmFromFilename(file.getFileName());
         const bool hasNameBPM = inferredBPM != "--";
-
-        juce::String inferredKey = "--";
-        if (std::regex_search(lowerName, keyMatch, keyTagPattern))
-        {
-            juce::String note = juce::String(keyMatch[1].str()).toUpperCase();
-            juce::String scale = juce::String(keyMatch[2].str());
-            inferredKey = note + (scale.startsWith("min") || scale == "m" ? " Min" : " Maj");
-        }
+        const auto inferredKey = getKeyFromFilename(file.getFileName());
 
         // Evitamos instanciar analizadores pesados para campos ya etiquetados.
         std::unique_ptr<soundtouch::BPMDetect> bpmDetector;
@@ -1099,37 +1135,12 @@ void MainComponent::updateFavoriteView()
 // {* nuevo código *}
 juce::String MainComponent::extractBPMFromName(const juce::String& fileName)
 {
-    std::string nameStr = fileName.toLowerCase().toStdString();
-
-    // Ahora busca números seguidos de "bpm", o solo "bp", o " bpm" (es a prueba de balas)
-    static const std::regex bpmRegex("([0-9]{2,3})\\s*bp");
-    std::smatch match;
-
-    if (std::regex_search(nameStr, match, bpmRegex)) {
-        return juce::String(match[1].str());
-    }
-    return "--";
+    return getBpmFromFilename(fileName);
 }
 
 juce::String MainComponent::extractKeyFromName(const juce::String& fileName)
 {
-    std::string nameStr = fileName.toLowerCase().toStdString();
-
-    // Busca las letras A-G, opcional un '#' o 'b', seguidos de min/maj/minor/major
-    static const std::regex keyRegex("([a-g][#b]?)\\s*(min|maj|minor|major|m\\b)");
-    std::smatch match;
-
-    if (std::regex_search(nameStr, match, keyRegex)) {
-        juce::String note = juce::String(match[1].str()).toUpperCase(); // Ej: "g#" -> "G#"
-        juce::String scale = juce::String(match[2].str());
-
-        // Limpiamos la escala para que se vea súper profesional
-        if (scale.startsWith("min") || scale == "m") scale = "Min";
-        if (scale.startsWith("maj")) scale = "Maj";
-
-        return note + " " + scale; // Resultado final: "G# Min"
-    }
-    return "--";
+    return getKeyFromFilename(fileName);
 }
 
 void MainComponent::analyzeBPM(const juce::File& file)
