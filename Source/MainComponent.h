@@ -7,7 +7,7 @@
 #include "WaveformDisplay.h"
 #include "TransportControls.h"
 #include "AudioPlayer.h"
-#include "SoundTouch/BPMDetect.h"
+#include "TempoDetector.h"
 #include "KeyDetector.h"
 #include "CustomTheme.h"
 
