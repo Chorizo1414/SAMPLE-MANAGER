@@ -116,6 +116,10 @@ private:
     // {* NUEVO: Memoria para las categorías *}
     juce::StringArray filteredCategories;
     juce::StringPairArray categoryDatabase;
+    // Distingue una categoria elegida por el usuario de una deteccion automatica.
+    // Se guarda en XML para que los nombres no sobrescriban una eleccion manual.
+    juce::StringPairArray manualCategoryDatabase;
+    juce::HashMap<juce::String, bool> manualCategoryLookup;
 
     // {* NUEVO: Memoria y botón para Favoritos *}
     juce::Array<bool> filteredFavorites;
