@@ -62,14 +62,28 @@ juce::String getBpmFromFilename(const juce::String& filename)
 // A clear filename tag beats folder heuristics and an earlier auto-analysis.
 juce::String getCategoryFromFilename(const juce::String& filename)
 {
-    const std::string name = filename.toLowerCase().toStdString();
-    static const std::regex oneShot(R"((?:^|[^a-z0-9])one[_\s-]*shots?(?:$|[^a-z0-9]))");
-    static const std::regex loop(R"((?:^|[^a-z0-9])loops?(?:$|[^a-z0-9]))");
-    static const std::regex sample(R"((?:^|[^a-z0-9])samples?(?:$|[^a-z0-9]))");
+    // Una pasada lineal, sin regex por cada fila de una libreria grande.
+    const std::string source = filename.toLowerCase().toStdString();
+    std::string tokens = "_";
+    tokens.reserve(source.size() + 2);
+    for (const unsigned char ch : source)
+    {
+        if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9'))
+            tokens.push_back(static_cast<char>(ch));
+        else if (tokens.back() != '_')
+            tokens.push_back('_');
+    }
+    if (tokens.back() != '_') tokens.push_back('_');
 
-    if (std::regex_search(name, oneShot)) return "ONE SHOT";
-    if (std::regex_search(name, loop)) return "LOOP";
-    if (std::regex_search(name, sample)) return "SAMPLE";
+    const auto has = [&tokens](const char* tag)
+    {
+        return tokens.find(tag) != std::string::npos;
+    };
+
+    if (has("_one_shot_") || has("_one_shots_") || has("_oneshot_") || has("_oneshots_"))
+        return "ONE SHOT";
+    if (has("_loop_") || has("_loops_")) return "LOOP";
+    if (has("_sample_") || has("_samples_")) return "SAMPLE";
     return {};
 }
 
@@ -1164,34 +1178,37 @@ void MainComponent::analyzeBPM(const juce::File& file)
                 return;
             }
 
-            safeThis->bpmDatabase.set(path, result.bpm);
+            const auto finalCategory = safeThis->manualCategoryLookup[path]
+                ? safeThis->categoryLookup[path] : result.category;
+            const auto finalBpm = finalCategory == "LOOP" ? result.bpm : juce::String("--");
+            safeThis->bpmDatabase.set(path, finalBpm);
             safeThis->keyDatabase.set(path, result.key);
-            safeThis->categoryDatabase.set(path, result.category);
-            safeThis->bpmLookup.set(path, result.bpm);
+            safeThis->categoryDatabase.set(path, finalCategory);
+            safeThis->bpmLookup.set(path, finalBpm);
             safeThis->keyLookup.set(path, result.key);
-            safeThis->categoryLookup.set(path, result.category);
+            safeThis->categoryLookup.set(path, finalCategory);
             if (safeThis->currentlyPreviewedFile == file)
-                safeThis->transportControls.updateDetectedMetadata(result.bpm, result.key);
+                safeThis->transportControls.updateDetectedMetadata(finalBpm, result.key);
             const int baseRow = safeThis->matchingAudioFiles.indexOf(file);
             if (baseRow >= 0)
             {
-                safeThis->matchingBPMs.set(baseRow, result.bpm);
+                safeThis->matchingBPMs.set(baseRow, finalBpm);
                 safeThis->matchingKeys.set(baseRow, result.key);
-                safeThis->matchingCategories.set(baseRow, result.category);
+                safeThis->matchingCategories.set(baseRow, finalCategory);
             }
             const int row = safeThis->filteredAudioFiles.indexOf(file);
             if (row >= 0)
             {
-                safeThis->filteredBPMs.set(row, result.bpm);
+                safeThis->filteredBPMs.set(row, finalBpm);
                 safeThis->filteredKeys.set(row, result.key);
-                safeThis->filteredCategories.set(row, result.category);
+                safeThis->filteredCategories.set(row, finalCategory);
                 safeThis->fileList.repaintRow(row);
 
                 if (safeThis->fileList.getSelectedRow() == row)
                 {
-                    const juce::String label = result.category == "LOOP"
-                        ? result.category + " | BPM: " + result.bpm + " | Key: " + result.key
-                        : result.category + " | Key: " + result.key;
+                    const juce::String label = finalCategory == "LOOP"
+                        ? finalCategory + " | BPM: " + finalBpm + " | Key: " + result.key
+                        : finalCategory + " | Key: " + result.key;
                     safeThis->bpmDisplayLabel.setText(label, juce::dontSendNotification);
                 }
             }
@@ -1344,14 +1361,17 @@ void MainComponent::startBatchAnalysis(BatchScope scope)
                     const auto path = item.file.getFullPathName();
                     // Puede haberse analizado en la vista previa o editado manualmente.
                     if (safeThis->bpmLookup.contains(path)) continue;
-                    safeThis->bpmDatabase.set(path, item.analysis.bpm);
+                    const auto finalCategory = safeThis->manualCategoryLookup[path]
+                        ? safeThis->categoryLookup[path] : item.analysis.category;
+                    const auto finalBpm = finalCategory == "LOOP" ? item.analysis.bpm : juce::String("--");
+                    safeThis->bpmDatabase.set(path, finalBpm);
                     safeThis->keyDatabase.set(path, item.analysis.key);
-                    safeThis->categoryDatabase.set(path, item.analysis.category);
-                    safeThis->bpmLookup.set(path, item.analysis.bpm);
+                    safeThis->categoryDatabase.set(path, finalCategory);
+                    safeThis->bpmLookup.set(path, finalBpm);
                     safeThis->keyLookup.set(path, item.analysis.key);
-                    safeThis->categoryLookup.set(path, item.analysis.category);
+                    safeThis->categoryLookup.set(path, finalCategory);
                     if (safeThis->currentlyPreviewedFile == item.file)
-                        safeThis->transportControls.updateDetectedMetadata(item.analysis.bpm,
+                        safeThis->transportControls.updateDetectedMetadata(finalBpm,
                                                                           item.analysis.key);
                     changed = true;
                 }
