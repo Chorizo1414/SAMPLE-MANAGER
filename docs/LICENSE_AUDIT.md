@@ -1,29 +1,39 @@
-# JoHu Crate: auditoría preliminar de licencias
+# JoHu Crate — revisión técnica de licencias (rama fix2)
 
-ESTADO: EN REVISIÓN. No publicar ejecutables Free ni Pro basándose solo en esta nota.
-Esta evaluación técnica no reemplaza una revisión legal del paquete final.
+**Estado: EN PRUEBAS. No publicar ejecutables Free o Pro hasta completar la validación final.**
 
-## Componentes
-- JUCE 9.0.4: bajo JUCE Starter, el uso comercial está permitido dentro de sus límites y condiciones. Confirmar el tipo de licencia aplicable, el límite de ingresos y la compatibilidad de las dependencias. Fuente: https://juce.com/legal/juce-9-licence/
-- BTrack: GPLv3. Sus fuentes se han retirado de este prototipo Free propietario. Verificar que no quede en los binarios ni en los paquetes de descarga. Fuente: https://github.com/adamstark/BTrack
-- SoundTouch (incluye BPMDetect): LGPLv2.1 o licencia comercial alternativa. La distribución comercial es posible bajo condiciones LGPL. Como hoy la biblioteca se compila directamente dentro del ejecutable, aún debemos proporcionar textos y fuentes, y cumplir la posibilidad de reemplazo o reenlazado de la biblioteca; evaluar biblioteca dinámica o licencia comercial. Fuente: https://www.surina.net/soundtouch/license.html
-- Kiss FFT: BSD-3-Clause. Uso comercial permitido con conservación de copyright, licencia y exención de garantías. Se ha separado en Source/KissFFT. Fuente: https://github.com/mborgerding/kissfft/blob/master/COPYING
+## Componentes que intervienen en esta versión de prueba
 
-## Implementación experimental
-- El análisis de BPM usa soundtouch::BPMDetect en lugar de BTrack.
-- Los BPM explícitos en el nombre del archivo tienen prioridad; de lo contrario se analiza el sonido.
-- Las tonalidades reconocidas en el nombre prevalecen sobre la estimación automática.
-- Se mantienen reproducción, favoritos, escaneos recursivos, análisis en segundo plano, pausa y cancelación.
+| Componente | Licencia | Estado |
+| --- | --- | --- |
+| JUCE 9.0.4 | JUCE 9 Starter (sujeto al plan y términos del usuario) | Uso comercial permitido dentro de los límites de ingresos y demás condiciones. Confirmar la licencia efectivamente activada. |
+| Signalsmith Stretch | MIT | Usado para pitch y tempo independientes. Archivo y licencia incluidos en Source/Signalsmith/. |
+| Signalsmith Linear | MIT | Dependencia DSP de Stretch. Archivos y licencia incluidos en Source/Signalsmith/. |
+| Kiss FFT | BSD-3-Clause | Detección de tonalidad; debe adjuntarse su aviso de copyright y licencia en el producto distribuido. |
+| BPM JoHu | Implementación original | Estimador basado en envolvente y autocorrelación en Source/TempoDetector.h. |
+| BTrack (GPLv3) | NO incluido en esta rama | Eliminado en una etapa anterior; comprobar binario y paquete final. |
+| SoundTouch (LGPLv2.1) | NO incluido en esta rama | Sustituido por Signalsmith y TempoDetector. No enlazar archivos de la carpeta antigua. |
 
-## Antes de distribuir al público
-- [ ] Compilar Debug y Release x64 en Visual Studio 2022 con JUCE 9.0.4.
-- [ ] Comparar BPM de 20-30 loops etiquetados y 20-30 sin etiquetas contra la versión anterior, incluidas detecciones a mitad/doble tempo.
-- [ ] Comprobar tonalidad de nombres y estimación FFT, y revisar resultados inciertos.
-- [ ] Probar análisis por lotes, pausa, cancelación, búsqueda, favoritos y persistencia XML.
-- [ ] Verificar que BTrack no se compile ni se incluya en la distribución.
-- [ ] Preparar licencia LGPLv2.1 completa y avisos para SoundTouch, código fuente correspondiente y mecanismo de reenlazado o licencia comercial.
-- [ ] Preparar licencia BSD-3-Clause completa y avisos para Kiss FFT.
-- [ ] Confirmar la compatibilidad de la distribución concreta con JUCE Starter mediante asesoramiento jurídico o consulta con los titulares.
-- [ ] Verificar las licencias de futuras dependencias antes de incorporarlas.
+## Enlaces y licencias oficiales
 
-Advertencia: una licencia que permite usos comerciales no garantiza por sí sola que una forma concreta de empaquetado cumpla todos sus requisitos.
+- JUCE 9: https://juce.com/legal/juce-9-licence/
+- Signalsmith Stretch: https://github.com/Signalsmith-Audio/signalsmith-stretch
+- Signalsmith Linear: https://github.com/Signalsmith-Audio/linear
+- MIT de Stretch: Source/Signalsmith/LICENSE-STRETCH.txt
+- MIT de Linear: Source/Signalsmith/LICENSE-LINEAR.txt
+- Kiss FFT: https://github.com/mborgerding/kissfft/blob/master/COPYING
+- BTrack (solo antecedente): https://github.com/adamstark/BTrack
+
+## Antes de distribuir cualquier ejecutable
+
+- [ ] Compilar Debug x64 y Release x64 en Visual Studio 2022 con JUCE 9.0.4.
+- [ ] Comparar la calidad y fluidez de Signalsmith con la version estable anterior, sobre todo en cambios de pitch/tempo mientras reproduce.
+- [ ] Probar saltos de playback, loop, reset al cambiar de sample, audio corto, WAV, MP3, MIDI y cambios de dispositivo.
+- [ ] Validar BPM propio con al menos 20 loops SIN etiqueta; revisar los resultados a mitad/doble tempo.
+- [ ] Confirmar con inspección del paquete/binario que no se enlazan ni se distribuyen librerías GPL/LGPL antiguas.
+- [ ] Incluir íntegramente licencias MIT de Stretch y Linear y aviso BSD de Kiss FFT en el paquete ZIP/instalador.
+- [ ] Confirmar los términos JUCE 9 Starter, especialmente restricciones, avisos y límite de ingresos.
+- [ ] Revisar otros recursos con derechos de terceros (iconos, audio de demostración, marcas) si se incorporan.
+- [ ] Publicar código/avisos solo con licencias correctamente elegidas para los archivos propios y de terceros.
+
+**Advertencia:** MIT y BSD autorizan comercialización, pero no eliminan todas las obligaciones de atribución. Esta auditoría técnica no sustituye el cumplimiento de los términos completos ni las pruebas del paquete real.
