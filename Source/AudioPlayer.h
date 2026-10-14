@@ -44,7 +44,7 @@ private:
     juce::AudioFormatManager formatManager;
     juce::AudioTransportSource transportSource;
     StretchAudioSource stretchSource{ &transportSource };
-    juce::ResamplingAudioSource resamplerSource{ &soundTouchSource, false, 2 };
+    juce::ResamplingAudioSource resamplerSource{ &stretchSource, false, 2 };
     std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
 
     // {* NUEVO: Variables del Mini-Sintetizador *}
