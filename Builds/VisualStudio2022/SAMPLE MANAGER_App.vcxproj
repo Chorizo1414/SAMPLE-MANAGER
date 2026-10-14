@@ -147,21 +147,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\..\Source\KissFFT\kiss_fft.c"/>
-    <ClCompile Include="..\..\Source\SoundTouchAudioSource.cpp"/>
-    <ClCompile Include="..\..\Source\SoundTouch\AAFilter.cpp"/>
-    <ClCompile Include="..\..\Source\SoundTouch\BPMDetect.cpp"/>
-    <ClCompile Include="..\..\Source\SoundTouch\cpu_detect_x86.cpp"/>
-    <ClCompile Include="..\..\Source\SoundTouch\FIFOSampleBuffer.cpp"/>
-    <ClCompile Include="..\..\Source\SoundTouch\FIRFilter.cpp"/>
-    <ClCompile Include="..\..\Source\SoundTouch\InterpolateCubic.cpp"/>
-    <ClCompile Include="..\..\Source\SoundTouch\InterpolateLinear.cpp"/>
-    <ClCompile Include="..\..\Source\SoundTouch\InterpolateShannon.cpp"/>
-    <ClCompile Include="..\..\Source\SoundTouch\mmx_optimized.cpp"/>
-    <ClCompile Include="..\..\Source\SoundTouch\PeakFinder.cpp"/>
-    <ClCompile Include="..\..\Source\SoundTouch\RateTransposer.cpp"/>
-    <ClCompile Include="..\..\Source\SoundTouch\SoundTouch.cpp"/>
-    <ClCompile Include="..\..\Source\SoundTouch\sse_optimized.cpp"/>
-    <ClCompile Include="..\..\Source\SoundTouch\TDStretch.cpp"/>
+    <ClCompile Include="..\..\Source\StretchAudioSource.cpp"/>
     <ClCompile Include="..\..\Source\AudioPlayer.cpp"/>
     <ClCompile Include="..\..\Source\TransportControls.cpp"/>
     <ClCompile Include="..\..\Source\Main.cpp"/>
@@ -2913,22 +2899,11 @@
     <ClInclude Include="..\..\Source\KeyDetector.h"/>
     <ClInclude Include="..\..\Source\KissFFT\_kiss_fft_guts.h"/>
     <ClInclude Include="..\..\Source\KissFFT\kiss_fft.h"/>
-    <ClInclude Include="..\..\Source\SoundTouchAudioSource.h"/>
-    <ClInclude Include="..\..\Source\SoundTouch\AAFilter.h"/>
-    <ClInclude Include="..\..\Source\SoundTouch\BPMDetect.h"/>
-    <ClInclude Include="..\..\Source\SoundTouch\cpu_detect.h"/>
-    <ClInclude Include="..\..\Source\SoundTouch\FIFOSampleBuffer.h"/>
-    <ClInclude Include="..\..\Source\SoundTouch\FIFOSamplePipe.h"/>
-    <ClInclude Include="..\..\Source\SoundTouch\FIRFilter.h"/>
-    <ClInclude Include="..\..\Source\SoundTouch\InterpolateCubic.h"/>
-    <ClInclude Include="..\..\Source\SoundTouch\InterpolateLinear.h"/>
-    <ClInclude Include="..\..\Source\SoundTouch\InterpolateShannon.h"/>
-    <ClInclude Include="..\..\Source\SoundTouch\PeakFinder.h"/>
-    <ClInclude Include="..\..\Source\SoundTouch\RateTransposer.h"/>
-    <ClInclude Include="..\..\Source\SoundTouch\SoundTouch.h"/>
-    <ClInclude Include="..\..\Source\SoundTouch\soundtouch_config.h"/>
-    <ClInclude Include="..\..\Source\SoundTouch\STTypes.h"/>
-    <ClInclude Include="..\..\Source\SoundTouch\TDStretch.h"/>
+    <ClInclude Include="..\..\Source\StretchAudioSource.h"/>
+    <ClInclude Include="..\..\Source\TempoDetector.h"/>
+    <ClInclude Include="..\..\Source\Signalsmith\signalsmith-stretch.h"/>
+    <ClInclude Include="..\..\Source\Signalsmith\signalsmith-linear\stft.h"/>
+    <ClInclude Include="..\..\Source\Signalsmith\signalsmith-linear\fft.h"/>
     <ClInclude Include="..\..\Source\AudioPlayer.h"/>
     <ClInclude Include="..\..\Source\TransportControls.h"/>
     <ClInclude Include="..\..\Source\MainComponent.h"/>
@@ -4272,10 +4247,6 @@
     <ClInclude Include="..\..\JuceLibraryCode\JuceHeader.h"/>
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\..\Source\SoundTouch\Makefile.am"/>
-    <None Include="..\..\Source\SoundTouch\SoundTouch.sln"/>
-    <None Include="..\..\Source\SoundTouch\SoundTouch.vcxproj"/>
-    <None Include="..\..\Source\SoundTouch\soundtouch_config.h.in"/>
     <None Include="..\..\..\..\..\APPS\JUCE\modules\juce_audio_devices\native\asio\LICENSE.txt"/>
     <None Include="..\..\..\..\..\APPS\JUCE\modules\juce_audio_devices\native\oboe\src\common\README.md"/>
     <None Include="..\..\..\..\..\APPS\JUCE\modules\juce_audio_devices\native\oboe\src\flowgraph\resampler\README.md"/>
