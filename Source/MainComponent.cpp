@@ -308,7 +308,8 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
             detectedBPM = inferredBPM.getDoubleValue();
 
     result.valid = true;
-    result.bpm = audioType == "LOOP" ? juce::String((int)std::round(detectedBPM)) : "--";
+    result.bpm = audioType == "LOOP" && detectedBPM > 0.0
+        ? juce::String(static_cast<int>(std::round(detectedBPM))) : "--";
     result.key = detectedKey;
     result.category = audioType;
     return result;
