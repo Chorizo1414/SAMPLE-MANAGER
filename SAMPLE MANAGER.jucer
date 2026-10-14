@@ -18,61 +18,13 @@
         
         
       </GROUP>
-      <FILE id="RIsQW3" name="SoundTouchAudioSource.cpp" compile="1" resource="0"
-            file="Source/SoundTouchAudioSource.cpp"/>
-      <FILE id="KPgbBJ" name="SoundTouchAudioSource.h" compile="0" resource="0"
-            file="Source/SoundTouchAudioSource.h"/>
-      <GROUP id="{259B9F20-ACEE-FD81-FB84-628773DA454E}" name="SoundTouch">
-        <FILE id="T1GSb8" name="AAFilter.cpp" compile="1" resource="0" file="Source/SoundTouch/AAFilter.cpp"/>
-        <FILE id="DfxFg0" name="AAFilter.h" compile="0" resource="0" file="Source/SoundTouch/AAFilter.h"/>
-        <FILE id="GMq4v2" name="BPMDetect.cpp" compile="1" resource="0" file="Source/SoundTouch/BPMDetect.cpp"/>
-        <FILE id="rlEVnG" name="BPMDetect.h" compile="0" resource="0" file="Source/SoundTouch/BPMDetect.h"/>
-        <FILE id="EeTPZ3" name="cpu_detect.h" compile="0" resource="0" file="Source/SoundTouch/cpu_detect.h"/>
-        <FILE id="tkWZoU" name="cpu_detect_x86.cpp" compile="1" resource="0"
-              file="Source/SoundTouch/cpu_detect_x86.cpp"/>
-        <FILE id="DF9FGN" name="FIFOSampleBuffer.cpp" compile="1" resource="0"
-              file="Source/SoundTouch/FIFOSampleBuffer.cpp"/>
-        <FILE id="zP4mB4" name="FIFOSampleBuffer.h" compile="0" resource="0"
-              file="Source/SoundTouch/FIFOSampleBuffer.h"/>
-        <FILE id="zkLCyr" name="FIFOSamplePipe.h" compile="0" resource="0"
-              file="Source/SoundTouch/FIFOSamplePipe.h"/>
-        <FILE id="csNyVr" name="FIRFilter.cpp" compile="1" resource="0" file="Source/SoundTouch/FIRFilter.cpp"/>
-        <FILE id="DCjLHS" name="FIRFilter.h" compile="0" resource="0" file="Source/SoundTouch/FIRFilter.h"/>
-        <FILE id="NeCMAR" name="InterpolateCubic.cpp" compile="1" resource="0"
-              file="Source/SoundTouch/InterpolateCubic.cpp"/>
-        <FILE id="OfKbcg" name="InterpolateCubic.h" compile="0" resource="0"
-              file="Source/SoundTouch/InterpolateCubic.h"/>
-        <FILE id="Q2wLi1" name="InterpolateLinear.cpp" compile="1" resource="0"
-              file="Source/SoundTouch/InterpolateLinear.cpp"/>
-        <FILE id="OLeU1M" name="InterpolateLinear.h" compile="0" resource="0"
-              file="Source/SoundTouch/InterpolateLinear.h"/>
-        <FILE id="Vtz0Rp" name="InterpolateShannon.cpp" compile="1" resource="0"
-              file="Source/SoundTouch/InterpolateShannon.cpp"/>
-        <FILE id="nRyqJ8" name="InterpolateShannon.h" compile="0" resource="0"
-              file="Source/SoundTouch/InterpolateShannon.h"/>
-        <FILE id="TM7HbG" name="Makefile.am" compile="0" resource="1" file="Source/SoundTouch/Makefile.am"/>
-        <FILE id="p9qB7T" name="mmx_optimized.cpp" compile="1" resource="0"
-              file="Source/SoundTouch/mmx_optimized.cpp"/>
-        <FILE id="CLM9BH" name="PeakFinder.cpp" compile="1" resource="0" file="Source/SoundTouch/PeakFinder.cpp"/>
-        <FILE id="nhXuzy" name="PeakFinder.h" compile="0" resource="0" file="Source/SoundTouch/PeakFinder.h"/>
-        <FILE id="LbpkhF" name="RateTransposer.cpp" compile="1" resource="0"
-              file="Source/SoundTouch/RateTransposer.cpp"/>
-        <FILE id="I5urJ5" name="RateTransposer.h" compile="0" resource="0"
-              file="Source/SoundTouch/RateTransposer.h"/>
-        <FILE id="EbSTbs" name="SoundTouch.cpp" compile="1" resource="0" file="Source/SoundTouch/SoundTouch.cpp"/>
-        <FILE id="lLvCiB" name="SoundTouch.h" compile="0" resource="0" file="Source/SoundTouch/SoundTouch.h"/>
-        <FILE id="uNXau8" name="SoundTouch.sln" compile="0" resource="1" file="Source/SoundTouch/SoundTouch.sln"/>
-        <FILE id="kpv2vC" name="SoundTouch.vcxproj" compile="0" resource="1"
-              file="Source/SoundTouch/SoundTouch.vcxproj"/>
-        <FILE id="rZpE1t" name="soundtouch_config.h" compile="0" resource="0"
-              file="Source/SoundTouch/soundtouch_config.h"/>
-        <FILE id="djgJxu" name="soundtouch_config.h.in" compile="0" resource="1"
-              file="Source/SoundTouch/soundtouch_config.h.in"/>
-        <FILE id="S1tP5T" name="sse_optimized.cpp" compile="1" resource="0"
-              file="Source/SoundTouch/sse_optimized.cpp"/>
-        <FILE id="eUaRE4" name="STTypes.h" compile="0" resource="0" file="Source/SoundTouch/STTypes.h"/>
-        <FILE id="peYNOa" name="TDStretch.cpp" compile="1" resource="0" file="Source/SoundTouch/TDStretch.cpp"/>
-        <FILE id="F9Upnx" name="TDStretch.h" compile="0" resource="0" file="Source/SoundTouch/TDStretch.h"/>
+      <FILE id="V4t5Rx" name="StretchAudioSource.cpp" compile="1" resource="0" file="Source/StretchAudioSource.cpp"/>
+      <FILE id="Q4u5Ra" name="StretchAudioSource.h" compile="0" resource="0" file="Source/StretchAudioSource.h"/>
+      <FILE id="N5v4Tp" name="TempoDetector.h" compile="0" resource="0" file="Source/TempoDetector.h"/>
+      <GROUP id="{9FAAE8F0-FD4C-4E28-B911-111F13232026}" name="Signalsmith">
+        <FILE id="P9n8Mf" name="signalsmith-stretch.h" compile="0" resource="0" file="Source/Signalsmith/signalsmith-stretch.h"/>
+        <FILE id="F4i2Lf" name="fft.h" compile="0" resource="0" file="Source/Signalsmith/signalsmith-linear/fft.h"/>
+        <FILE id="U3n7Lm" name="stft.h" compile="0" resource="0" file="Source/Signalsmith/signalsmith-linear/stft.h"/>
       </GROUP>
       <FILE id="F1JMHg" name="AudioPlayer.cpp" compile="1" resource="0" file="Source/AudioPlayer.cpp"/>
       <FILE id="Vcoir1" name="AudioPlayer.h" compile="0" resource="0" file="Source/AudioPlayer.h"/>
