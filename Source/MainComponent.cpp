@@ -23,6 +23,56 @@ private:
     std::function<void(BackgroundTask&)> work;
 };
 
+
+juce::String getBpmFromFilename(const juce::String& filename)
+{
+    const std::string name = filename.toLowerCase().toStdString();
+
+    // First prefer an explicit 120BPM/BPM120 label.
+    static const std::regex suffixBpm(R"((?:^|[^a-z0-9])([0-9]{2,3})\s*bpm?(?:$|[^a-z0-9]))");
+    static const std::regex prefixBpm(R"((?:^|[^a-z0-9])bpm[_\s-]*([0-9]{2,3})(?:$|[^a-z0-9]))");
+    // Libraries frequently name loops OS_RNB_125_Drum_Loop.wav without "BPM".
+    static const std::regex standaloneNumber(R"((?:^|[_\s-])([0-9]{2,3})(?:$|[_\s.-]))");
+    std::smatch match;
+    const auto validBpm = [](const std::smatch& m)
+    {
+        const int bpm = std::stoi(m[1].str());
+        return bpm >= 40 && bpm <= 240 ? juce::String(bpm) : juce::String();
+    };
+
+    if (std::regex_search(name, match, suffixBpm))
+    {
+        const auto bpm = validBpm(match);
+        if (bpm.isNotEmpty()) return bpm;
+    }
+    if (std::regex_search(name, match, prefixBpm))
+    {
+        const auto bpm = validBpm(match);
+        if (bpm.isNotEmpty()) return bpm;
+    }
+    for (auto it = std::sregex_iterator(name.begin(), name.end(), standaloneNumber);
+         it != std::sregex_iterator(); ++it)
+    {
+        const auto bpm = validBpm(*it);
+        if (bpm.isNotEmpty()) return bpm;
+    }
+    return "--";
+}
+
+juce::String getKeyFromFilename(const juce::String& filename)
+{
+    const std::string name = filename.toLowerCase().toStdString();
+    // Treat underscores as token separators: F#m_ and Dm_ must match too.
+    static const std::regex pattern(
+        R"((?:^|[^a-z0-9])([a-g][#b]?)\s*(minor|major|min|maj|m)(?:$|[^a-z0-9]))");
+    std::smatch match;
+    if (!std::regex_search(name, match, pattern)) return "--";
+
+    const juce::String note = juce::String(match[1].str()).toUpperCase();
+    const juce::String mode = juce::String(match[2].str());
+    return note + (mode == "m" || mode.startsWith("min") ? " Min" : " Maj");
+}
+
 struct AudioAnalysisResult
 {
     bool valid = false;
@@ -48,15 +98,31 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
         return result;
         double durationInSeconds = (double)reader->lengthInSamples / (double)reader->sampleRate;
 
-        BTrack bpmDetector;
-        KeyDetector keyDetector(reader->sampleRate);
-
+        // SoundTouch BPMDetect es LGPLv2.1 y ya pertenece a las dependencias del proyecto.
+        // Separamos la deteccion de BPM del codigo GPLv3 de BTrack.
         int maxSeconds = 60;
         juce::int64 numSamplesToRead = juce::jmin(reader->lengthInSamples, (juce::int64)(reader->sampleRate * maxSeconds));
 
         int hopSize = 512;
         juce::AudioBuffer<float> buffer(reader->numChannels, hopSize);
         juce::HeapBlock<double> monoFrame(hopSize);
+        juce::HeapBlock<soundtouch::SAMPLETYPE> bpmFrame(hopSize);
+
+        // El nombre tiene prioridad sobre la estimacion DSP.
+        const auto inferredBPM = nameBPM.isNotEmpty() && nameBPM != "--"
+                                   ? nameBPM : getBpmFromFilename(file.getFileName());
+        const bool hasNameBPM = inferredBPM != "--";
+        const auto inferredKey = getKeyFromFilename(file.getFileName());
+
+        // Evitamos instanciar analizadores pesados para campos ya etiquetados.
+        std::unique_ptr<soundtouch::BPMDetect> bpmDetector;
+        if (!hasNameBPM)
+            bpmDetector = std::make_unique<soundtouch::BPMDetect>(1, static_cast<int>(reader->sampleRate));
+
+        std::unique_ptr<KeyDetector> keyDetector;
+        if (inferredKey == "--")
+            keyDetector = std::make_unique<KeyDetector>(reader->sampleRate);
+
         juce::int64 samplesRead = 0;
 
         int peakCount = 0;
@@ -91,6 +157,7 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
                         sum += buffer.getReadPointer(ch)[i];
 
                     monoFrame[i] = (double)(sum / reader->numChannels);
+                    bpmFrame[i] = static_cast<soundtouch::SAMPLETYPE>(monoFrame[i]);
 
                     double absSample = std::abs(monoFrame[i]);
                     runningAverage = 0.999 * runningAverage + 0.001 * absSample;
@@ -106,15 +173,20 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
                 else { monoFrame[i] = 0.0; }
             }
 
-            bpmDetector.processAudioFrame(monoFrame.getData());
-            keyDetector.processAudioFrame(monoFrame.getData(), samplesToGet);
+            // No analizamos BPM cuando el nombre ya especifica un valor.
+            if (bpmDetector != nullptr)
+                bpmDetector->inputSamples(bpmFrame.getData(), samplesToGet);
+            if (keyDetector != nullptr)
+                keyDetector->processAudioFrame(monoFrame.getData(), samplesToGet);
             // Cedemos CPU a la reproducción y a la UI durante análisis largos.
             if ((samplesRead / hopSize) % 16 == 0) juce::Thread::sleep(3);
             samplesRead += samplesToGet;
         }
 
-        double detectedBPM = bpmDetector.getCurrentTempoEstimate();
-        juce::String detectedKey = keyDetector.getDetectedKey();
+        double detectedBPM = hasNameBPM ? inferredBPM.getDoubleValue()
+                                         : static_cast<double>(bpmDetector->getBpm());
+        if (!std::isfinite(detectedBPM) || detectedBPM <= 0.0) detectedBPM = 0.0;
+        juce::String detectedKey = keyDetector != nullptr ? keyDetector->getDetectedKey() : inferredKey;
 
         juce::String fileNameLower = file.getFileName().toLowerCase();
         juce::String audioType;
@@ -138,6 +210,7 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
         if (!learnedTypeFound)
         {
             isExplicitLoop = fileNameLower.contains("loop") || fileNameLower.contains("bpm") ||
+                (fileNameLower.contains("_ll_") && hasNameBPM) ||
                 parentFolder.contains("loop") || parentFolder.contains("melody");
 
             isExplicitOneShot = fileNameLower.contains("oneshot") || fileNameLower.contains("one shot") ||
@@ -160,6 +233,12 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
         if (learnedTypeFound)
         {
             // audioType ya se definió por la base de datos de aprendizaje
+        }
+        else if (isExplicitLoop
+                 && (fileNameLower.contains("loop") || fileNameLower.contains("_ll_")))
+        {
+            // "Perc_Loop" and "Drum_Loop_No_Kick" are still loops.
+            audioType = "LOOP";
         }
         else if (isExplicitOneShot)
         {
@@ -192,19 +271,9 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
             }
         }
 
-        // El trabajador de lote calcula el BPM del nombre sin acceder a MainComponent.
-        juce::String inferredBPM = nameBPM;
-        if (inferredBPM.isEmpty())
-        {
-            static const std::regex bpmPattern("([0-9]{2,3})\\s*bp");
-            std::smatch match;
-            const std::string lowercaseName = file.getFileName().toLowerCase().toStdString();
-            inferredBPM = std::regex_search(lowercaseName, match, bpmPattern)
-                              ? juce::String(match[1].str()) : "--";
-        }
-        if (inferredBPM != "--" && audioType == "LOOP")
+        // La prioridad del nombre ya se aplico antes del analisis.
+        if (hasNameBPM && audioType == "LOOP")
             detectedBPM = inferredBPM.getDoubleValue();
-
 
     result.valid = true;
     result.bpm = audioType == "LOOP" ? juce::String((int)std::round(detectedBPM)) : "--";
@@ -660,6 +729,9 @@ void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
         menu.addItem(3, "Forzar como SAMPLE");
         menu.addSeparator();
         menu.addItem(4, "Corregir BPM manualmente...");
+        menu.addItem(5, "Restaurar BPM y tonalidad del nombre",
+                     extractBPMFromName(selectedAudioFile.getFileName()) != "--"
+                     || extractKeyFromName(selectedAudioFile.getFileName()) != "--");
 
         menu.showMenuAsync(juce::PopupMenu::Options(), [this, row, selectedAudioFile, filePath](int result)
             {
@@ -691,6 +763,36 @@ void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
                     }
 
                     fileList.repaintRow(row);
+                    saveDatabase();
+                    applyFilters();
+                }
+                else if (result == 5) // El usuario decide si reemplaza valores antiguos.
+                {
+                    const auto namedBpm = extractBPMFromName(selectedAudioFile.getFileName());
+                    const auto namedKey = extractKeyFromName(selectedAudioFile.getFileName());
+                    const auto nameLower = selectedAudioFile.getFileName().toLowerCase();
+
+                    if (namedBpm != "--")
+                    {
+                        bpmDatabase.set(filePath, namedBpm);
+                        bpmLookup.set(filePath, namedBpm);
+                        if (nameLower.contains("loop") || nameLower.contains("_ll_"))
+                        {
+                            categoryDatabase.set(filePath, "LOOP");
+                            categoryLookup.set(filePath, "LOOP");
+                        }
+                    }
+                    if (namedKey != "--")
+                    {
+                        keyDatabase.set(filePath, namedKey);
+                        keyLookup.set(filePath, namedKey);
+                    }
+
+                    if (currentlyPreviewedFile == selectedAudioFile)
+                        transportControls.updateDetectedMetadata(
+                            bpmLookup.contains(filePath) ? bpmLookup[filePath] : "--",
+                            keyLookup.contains(filePath) ? keyLookup[filePath] : "--");
+
                     saveDatabase();
                     applyFilters();
                 }
@@ -791,146 +893,28 @@ void MainComponent::selectedRowsChanged(int lastRowSelected)
         previewAudio(filteredAudioFiles[lastRowSelected]);
 }
 
+// JoHu Crate Free: arrastrar entrega el sample ORIGINAL sin renderizar los
+// cambios de BPM/pitch. La vista previa musical y el analisis siguen disponibles.
+// La exportacion procesada se reserva para JoHu Crate Pro.
 void MainComponent::mouseDrag(const juce::MouseEvent& e)
 {
     if (e.getDistanceFromDragStart() < 3)
         return;
 
-    if (fileList.isParentOf(e.originalComponent) || e.originalComponent == &fileList)
-    {
-        int row = fileList.getSelectedRow();
-        if (row >= 0 && row < filteredAudioFiles.size())
-        {
-            juce::File selectedFile = filteredAudioFiles[row];
-            juce::StringArray filesToDrag;
+    if (!fileList.isParentOf(e.originalComponent) && e.originalComponent != &fileList)
+        return;
 
-            // Regla: Si es MIDI o no hay alteraciones, exportamos el original rápido
-            bool hasProcessing = (currentPitchSemitones != 0.0 || currentTempoMultiplier != 1.0);
-            if (selectedFile.hasFileExtension(".mid") || !hasProcessing)
-            {
-                filesToDrag.add(selectedFile.getFullPathName());
-                juce::DragAndDropContainer::performExternalDragDropOfFiles(filesToDrag, false, this);
-                return;
-            }
+    const int row = fileList.getSelectedRow();
+    if (row < 0 || row >= filteredAudioFiles.size())
+        return;
 
-            // --- MOTOR DE EXPORTACIÓN AVANZADO (Con Sistema Dual: Stretch + Resampler) ---
-            juce::File tempDir = juce::File::getSpecialLocation(juce::File::tempDirectory);
-            juce::String uniqueName = "Processed_" + juce::String(juce::Time::currentTimeMillis()) + "_" + selectedFile.getFileNameWithoutExtension() + ".wav";
-            juce::File tempFile = tempDir.getChildFile(uniqueName);
+    const auto selectedFile = filteredAudioFiles[row];
+    if (!selectedFile.existsAsFile())
+        return;
 
-            auto* reader = audioPlayer.getFormatManager().createReaderFor(selectedFile);
-            if (reader != nullptr)
-            {
-                auto readerSource = std::make_unique<juce::AudioFormatReaderSource>(reader, true);
-
-                // 1. RECREAMOS LA CADENA DE AUDIO EXACTA DE TU REPRODUCTOR
-                SoundTouchAudioSource offlineSoundTouch(readerSource.get());
-                juce::ResamplingAudioSource offlineResampler(&offlineSoundTouch, false, 2);
-
-                // {* EL ARREGLO: PRIMERO INICIAMOS LOS MOTORES (Para que no borren las instrucciones) *}
-                readerSource->prepareToPlay(512, reader->sampleRate);
-                offlineSoundTouch.prepareToPlay(512, reader->sampleRate);
-                offlineResampler.prepareToPlay(512, reader->sampleRate);
-
-                double effectiveMultiplier = 1.0;
-
-                // 2. LUEGO APLICAMOS LA LÓGICA Y LOS PARÁMETROS
-                if (isStretchEnabled)
-                {
-                    // Modo Warp / Stretch (Conserva el tiempo original)
-                    offlineSoundTouch.setStretchEnabled(true);
-                    offlineSoundTouch.setPitchSemiTones(currentPitchSemitones);
-                    offlineSoundTouch.setTempoMultiplier(currentTempoMultiplier);
-                    offlineResampler.setResamplingRatio(1.0);
-                    effectiveMultiplier = currentTempoMultiplier;
-                }
-                else
-                {
-                    // Modo Vinilo clásico (Alterar pitch cambia la velocidad)
-                    offlineSoundTouch.setStretchEnabled(false);
-                    offlineSoundTouch.setPitchSemiTones(0.0);
-                    offlineSoundTouch.setTempoMultiplier(1.0);
-
-                    double pitchRatio = std::pow(2.0, currentPitchSemitones / 12.0);
-                    double finalRatio = pitchRatio * currentTempoMultiplier;
-                    offlineResampler.setResamplingRatio(finalRatio);
-                    effectiveMultiplier = finalRatio;
-                }
-
-                auto outStream = new juce::FileOutputStream(tempFile);
-                if (outStream->openedOk())
-                {
-                    juce::WavAudioFormat wavFormat;
-                    std::unique_ptr<juce::AudioFormatWriter> writer(wavFormat.createWriterFor(
-                        outStream,
-                        reader->sampleRate,
-                        reader->numChannels,
-                        16,
-                        {},
-                        0));
-
-                    if (writer != nullptr)
-                    {
-                        // Calculamos cuánto va a durar el audio nuevo basado en las matemáticas
-                        double estimatedDuration = (reader->lengthInSamples / reader->sampleRate) / effectiveMultiplier;
-                        juce::int64 estimatedSamples = (juce::int64)(estimatedDuration * reader->sampleRate);
-
-                        juce::AudioBuffer<float> renderBuffer(reader->numChannels, 512);
-                        juce::AudioSourceChannelInfo info(&renderBuffer, 0, 512);
-
-                        juce::int64 samplesWritten = 0;
-                        int consecutiveSilenceBlocks = 0;
-
-                        while (samplesWritten < estimatedSamples + (reader->sampleRate * 2.0))
-                        {
-                            renderBuffer.clear();
-
-                            // LE PEDIMOS EL AUDIO AL ÚLTIMO ESLABÓN DE LA CADENA (El Resampler)
-                            offlineResampler.getNextAudioBlock(info);
-
-                            float magnitude = renderBuffer.getMagnitude(0, 512);
-                            if (magnitude < 0.0001f && samplesWritten >= estimatedSamples)
-                            {
-                                consecutiveSilenceBlocks++;
-                                if (consecutiveSilenceBlocks > 10) break; // Terminar si hay silencio absoluto
-                            }
-                            else
-                            {
-                                consecutiveSilenceBlocks = 0;
-                            }
-
-                            writer->writeFromAudioSampleBuffer(renderBuffer, 0, 512);
-                            samplesWritten += 512;
-                        }
-
-                        // Destruimos el escritor primero para soltar el candado de Windows
-                        writer.reset();
-                        offlineResampler.releaseResources();
-                        offlineSoundTouch.releaseResources();
-                        readerSource->releaseResources();
-
-                        filesToDrag.add(tempFile.getFullPathName());
-                    }
-                    else
-                    {
-                        delete outStream;
-                        filesToDrag.add(selectedFile.getFullPathName());
-                    }
-                }
-                else
-                {
-                    delete outStream;
-                    filesToDrag.add(selectedFile.getFullPathName());
-                }
-            }
-            else
-            {
-                filesToDrag.add(selectedFile.getFullPathName());
-            }
-
-            juce::DragAndDropContainer::performExternalDragDropOfFiles(filesToDrag, false, this);
-        }
-    }
+    juce::StringArray filesToDrag;
+    filesToDrag.add(selectedFile.getFullPathName());
+    juce::DragAndDropContainer::performExternalDragDropOfFiles(filesToDrag, false, this);
 }
 
 void MainComponent::textEditorTextChanged(juce::TextEditor& editor)
@@ -1010,6 +994,7 @@ void MainComponent::applyFilters()
             if (currentCat == "--")
             {
                 bool isLoopHint = fileName.contains("loop") || fileName.contains("bpm") ||
+                    (fileName.contains("_ll_") && extractBPMFromName(fileName) != "--") ||
                     parentFolder.contains("loop") || parentFolder.contains("melody");
 
                 bool isOneShotHint = fileName.contains("oneshot") || fileName.contains("kick") ||
@@ -1039,7 +1024,7 @@ void MainComponent::applyFilters()
         }
         else
         {
-            matchingBPMs.add(extractBPMFromName(fileName));
+            matchingBPMs.add(currentCat == "LOOP" ? extractBPMFromName(fileName) : "--");
             matchingKeys.add(extractKeyFromName(fileName));
         }
     }
@@ -1073,37 +1058,12 @@ void MainComponent::updateFavoriteView()
 // {* nuevo código *}
 juce::String MainComponent::extractBPMFromName(const juce::String& fileName)
 {
-    std::string nameStr = fileName.toLowerCase().toStdString();
-
-    // Ahora busca números seguidos de "bpm", o solo "bp", o " bpm" (es a prueba de balas)
-    static const std::regex bpmRegex("([0-9]{2,3})\\s*bp");
-    std::smatch match;
-
-    if (std::regex_search(nameStr, match, bpmRegex)) {
-        return juce::String(match[1].str());
-    }
-    return "--";
+    return getBpmFromFilename(fileName);
 }
 
 juce::String MainComponent::extractKeyFromName(const juce::String& fileName)
 {
-    std::string nameStr = fileName.toLowerCase().toStdString();
-
-    // Busca las letras A-G, opcional un '#' o 'b', seguidos de min/maj/minor/major
-    static const std::regex keyRegex("([a-g][#b]?)\\s*(min|maj|minor|major|m\\b)");
-    std::smatch match;
-
-    if (std::regex_search(nameStr, match, keyRegex)) {
-        juce::String note = juce::String(match[1].str()).toUpperCase(); // Ej: "g#" -> "G#"
-        juce::String scale = juce::String(match[2].str());
-
-        // Limpiamos la escala para que se vea súper profesional
-        if (scale.startsWith("min") || scale == "m") scale = "Min";
-        if (scale.startsWith("maj")) scale = "Maj";
-
-        return note + " " + scale; // Resultado final: "G# Min"
-    }
-    return "--";
+    return getKeyFromFilename(fileName);
 }
 
 void MainComponent::analyzeBPM(const juce::File& file)
