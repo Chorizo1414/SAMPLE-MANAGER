@@ -126,15 +126,13 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
         return result;
         double durationInSeconds = (double)reader->lengthInSamples / (double)reader->sampleRate;
 
-        // SoundTouch BPMDetect es LGPLv2.1 y ya pertenece a las dependencias del proyecto.
-        // Separamos la deteccion de BPM del codigo GPLv3 de BTrack.
+        // El analisis de BPM utiliza el detector propio, sin librerias LGPL/GPL.
         int maxSeconds = 60;
         juce::int64 numSamplesToRead = juce::jmin(reader->lengthInSamples, (juce::int64)(reader->sampleRate * maxSeconds));
 
         int hopSize = 512;
         juce::AudioBuffer<float> buffer(reader->numChannels, hopSize);
         juce::HeapBlock<double> monoFrame(hopSize);
-        juce::HeapBlock<soundtouch::SAMPLETYPE> bpmFrame(hopSize);
 
         // El nombre tiene prioridad sobre la estimacion DSP.
         const auto inferredBPM = nameBPM.isNotEmpty() && nameBPM != "--"
@@ -143,9 +141,9 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
         const auto inferredKey = getKeyFromFilename(file.getFileName());
 
         // Evitamos instanciar analizadores pesados para campos ya etiquetados.
-        std::unique_ptr<soundtouch::BPMDetect> bpmDetector;
+        std::unique_ptr<TempoDetector> bpmDetector;
         if (!hasNameBPM)
-            bpmDetector = std::make_unique<soundtouch::BPMDetect>(1, static_cast<int>(reader->sampleRate));
+            bpmDetector = std::make_unique<TempoDetector>(reader->sampleRate);
 
         std::unique_ptr<KeyDetector> keyDetector;
         if (inferredKey == "--")
@@ -185,7 +183,8 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
                         sum += buffer.getReadPointer(ch)[i];
 
                     monoFrame[i] = (double)(sum / reader->numChannels);
-                    bpmFrame[i] = static_cast<soundtouch::SAMPLETYPE>(monoFrame[i]);
+                    if (bpmDetector != nullptr)
+                        bpmDetector->addSample(monoFrame[i]);
 
                     double absSample = std::abs(monoFrame[i]);
                     runningAverage = 0.999 * runningAverage + 0.001 * absSample;
@@ -202,8 +201,6 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
             }
 
             // No analizamos BPM cuando el nombre ya especifica un valor.
-            if (bpmDetector != nullptr)
-                bpmDetector->inputSamples(bpmFrame.getData(), samplesToGet);
             if (keyDetector != nullptr)
                 keyDetector->processAudioFrame(monoFrame.getData(), samplesToGet);
             // Cedemos CPU a la reproducción y a la UI durante análisis largos.
@@ -212,7 +209,7 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
         }
 
         double detectedBPM = hasNameBPM ? inferredBPM.getDoubleValue()
-                                         : static_cast<double>(bpmDetector->getBpm());
+                                         : bpmDetector->estimateBpm();
         if (!std::isfinite(detectedBPM) || detectedBPM <= 0.0) detectedBPM = 0.0;
         juce::String detectedKey = keyDetector != nullptr ? keyDetector->getDetectedKey() : inferredKey;
 
