@@ -59,6 +59,34 @@ juce::String getBpmFromFilename(const juce::String& filename)
     return "--";
 }
 
+// A clear filename tag beats folder heuristics and an earlier auto-analysis.
+juce::String getCategoryFromFilename(const juce::String& filename)
+{
+    // Una pasada lineal, sin regex por cada fila de una libreria grande.
+    const std::string source = filename.toLowerCase().toStdString();
+    std::string tokens = "_";
+    tokens.reserve(source.size() + 2);
+    for (const unsigned char ch : source)
+    {
+        if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9'))
+            tokens.push_back(static_cast<char>(ch));
+        else if (tokens.back() != '_')
+            tokens.push_back('_');
+    }
+    if (tokens.back() != '_') tokens.push_back('_');
+
+    const auto has = [&tokens](const char* tag)
+    {
+        return tokens.find(tag) != std::string::npos;
+    };
+
+    if (has("_one_shot_") || has("_one_shots_") || has("_oneshot_") || has("_oneshots_"))
+        return "ONE SHOT";
+    if (has("_loop_") || has("_loops_")) return "LOOP";
+    if (has("_sample_") || has("_samples_")) return "SAMPLE";
+    return {};
+}
+
 juce::String getKeyFromFilename(const juce::String& filename)
 {
     const std::string name = filename.toLowerCase().toStdString();
@@ -189,12 +217,14 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
         juce::String detectedKey = keyDetector != nullptr ? keyDetector->getDetectedKey() : inferredKey;
 
         juce::String fileNameLower = file.getFileName().toLowerCase();
+        const juce::String nameCategory = getCategoryFromFilename(file.getFileName());
         juce::String audioType;
         juce::String parentFolder = file.getParentDirectory().getFileName().toLowerCase();
 
         bool learnedTypeFound = false;
         for (auto& keyword : learnedPatterns.getAllKeys())
         {
+            if (nameCategory.isNotEmpty()) break;
             if (parentFolder.contains(keyword.toLowerCase()))
             {
                 audioType = learnedPatterns[keyword];
@@ -207,7 +237,7 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
         bool isExplicitLoop = false;
         bool isExplicitOneShot = false;
 
-        if (!learnedTypeFound)
+        if (!learnedTypeFound && nameCategory.isEmpty())
         {
             isExplicitLoop = fileNameLower.contains("loop") || fileNameLower.contains("bpm") ||
                 (fileNameLower.contains("_ll_") && hasNameBPM) ||
@@ -230,7 +260,12 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
                 parentFolder.contains("cymbal");
         }
 
-        if (learnedTypeFound)
+        if (nameCategory.isNotEmpty())
+        {
+            audioType = nameCategory;
+            if (audioType != "LOOP") detectedBPM = 0.0;
+        }
+        else if (learnedTypeFound)
         {
             // audioType ya se definió por la base de datos de aprendizaje
         }
@@ -747,6 +782,8 @@ void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
                     filteredCategories.set(row, newType);
                     categoryDatabase.set(filePath, newType);
                     categoryLookup.set(filePath, newType);
+                    manualCategoryDatabase.set(filePath, "1");
+                    manualCategoryLookup.set(filePath, true);
 
                     if (newType != "LOOP")
                     {
@@ -772,15 +809,25 @@ void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
                     const auto namedKey = extractKeyFromName(selectedAudioFile.getFileName());
                     const auto nameLower = selectedAudioFile.getFileName().toLowerCase();
 
-                    if (namedBpm != "--")
+                    const auto explicitCategory = getCategoryFromFilename(selectedAudioFile.getFileName());
+                    // StringPairArray::remove tiene sobrecargas ambiguas en algunas
+                    // versiones de JUCE. Persistimos "0" para indicar modo automatico.
+                    manualCategoryDatabase.set(filePath, "0");
+                    manualCategoryLookup.set(filePath, false);
+                    if (explicitCategory.isNotEmpty())
+                    {
+                        categoryDatabase.set(filePath, explicitCategory);
+                        categoryLookup.set(filePath, explicitCategory);
+                    }
+                    if (namedBpm != "--" && explicitCategory != "ONE SHOT" && explicitCategory != "SAMPLE")
                     {
                         bpmDatabase.set(filePath, namedBpm);
                         bpmLookup.set(filePath, namedBpm);
-                        if (nameLower.contains("loop") || nameLower.contains("_ll_"))
-                        {
-                            categoryDatabase.set(filePath, "LOOP");
-                            categoryLookup.set(filePath, "LOOP");
-                        }
+                    }
+                    else if (explicitCategory == "ONE SHOT" || explicitCategory == "SAMPLE")
+                    {
+                        bpmDatabase.set(filePath, "--");
+                        bpmLookup.set(filePath, "--");
                     }
                     if (namedKey != "--")
                     {
@@ -823,6 +870,8 @@ void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
                                     bpmLookup.set(filePath, bpmString);
                                     categoryDatabase.set(filePath, "LOOP");
                                     categoryLookup.set(filePath, "LOOP");
+                                    manualCategoryDatabase.set(filePath, "1");
+                                    manualCategoryLookup.set(filePath, true);
 
                                     // Refrescamos TODA la UI y guardamos en el XML para que el cambio se vea al instante
                                     saveDatabase();
@@ -863,6 +912,10 @@ void MainComponent::previewAudio(const juce::File& file)
                                  : extractBPMFromName(file.getFileName());
     juce::String sourceKey = keyLookup.contains(path) ? keyLookup[path]
                                  : extractKeyFromName(file.getFileName());
+    const auto explicitCategory = getCategoryFromFilename(file.getFileName());
+    if (!manualCategoryLookup[path]
+        && (explicitCategory == "ONE SHOT" || explicitCategory == "SAMPLE"))
+        sourceBpm = "--";
     if (file.hasFileExtension(".mid"))
     {
         // No se inventa el tempo ni la tonalidad para partituras MIDI.
@@ -977,6 +1030,9 @@ void MainComponent::applyFilters()
 
         // Extraemos la categoría
         juce::String currentCat = categoryLookup.contains(filePath) ? categoryLookup[filePath] : "--";
+        const auto explicitCategory = isMidi ? juce::String() : getCategoryFromFilename(fileName);
+        if (explicitCategory.isNotEmpty() && !manualCategoryLookup[filePath])
+            currentCat = explicitCategory;
         if (currentCat == "--" && !isMidi)
         {
             juce::String parentFolder = file.getParentDirectory().getFileName().toLowerCase();
@@ -1017,16 +1073,10 @@ void MainComponent::applyFilters()
         matchingAudioFiles.add(file);
         matchingCategories.add(currentCat);
 
-        if (bpmLookup.contains(filePath))
-        {
-            matchingBPMs.add(bpmLookup[filePath]);
-            matchingKeys.add(keyLookup[filePath]);
-        }
-        else
-        {
-            matchingBPMs.add(currentCat == "LOOP" ? extractBPMFromName(fileName) : "--");
-            matchingKeys.add(extractKeyFromName(fileName));
-        }
+        matchingBPMs.add(currentCat == "LOOP"
+            ? (bpmLookup.contains(filePath) ? bpmLookup[filePath] : extractBPMFromName(fileName))
+            : "--");
+        matchingKeys.add(keyLookup.contains(filePath) ? keyLookup[filePath] : extractKeyFromName(fileName));
     }
 
     updateFavoriteView();
@@ -1086,7 +1136,11 @@ void MainComponent::analyzeBPM(const juce::File& file)
 
     if (bpmLookup.contains(path))
     {
-        const juce::String savedBPM = bpmLookup[path];
+        juce::String savedBPM = bpmLookup[path];
+        const auto explicitCategory = getCategoryFromFilename(file.getFileName());
+        if (!manualCategoryLookup[path]
+            && (explicitCategory == "ONE SHOT" || explicitCategory == "SAMPLE"))
+            savedBPM = "--";
         juce::String savedKey = keyLookup[path];
         if (savedKey.isEmpty()) savedKey = "--";
         bpmDisplayLabel.setText("BPM: " + savedBPM + " | Key: " + savedKey, juce::dontSendNotification);
@@ -1126,34 +1180,37 @@ void MainComponent::analyzeBPM(const juce::File& file)
                 return;
             }
 
-            safeThis->bpmDatabase.set(path, result.bpm);
+            const auto finalCategory = safeThis->manualCategoryLookup[path]
+                ? safeThis->categoryLookup[path] : result.category;
+            const auto finalBpm = finalCategory == "LOOP" ? result.bpm : juce::String("--");
+            safeThis->bpmDatabase.set(path, finalBpm);
             safeThis->keyDatabase.set(path, result.key);
-            safeThis->categoryDatabase.set(path, result.category);
-            safeThis->bpmLookup.set(path, result.bpm);
+            safeThis->categoryDatabase.set(path, finalCategory);
+            safeThis->bpmLookup.set(path, finalBpm);
             safeThis->keyLookup.set(path, result.key);
-            safeThis->categoryLookup.set(path, result.category);
+            safeThis->categoryLookup.set(path, finalCategory);
             if (safeThis->currentlyPreviewedFile == file)
-                safeThis->transportControls.updateDetectedMetadata(result.bpm, result.key);
+                safeThis->transportControls.updateDetectedMetadata(finalBpm, result.key);
             const int baseRow = safeThis->matchingAudioFiles.indexOf(file);
             if (baseRow >= 0)
             {
-                safeThis->matchingBPMs.set(baseRow, result.bpm);
+                safeThis->matchingBPMs.set(baseRow, finalBpm);
                 safeThis->matchingKeys.set(baseRow, result.key);
-                safeThis->matchingCategories.set(baseRow, result.category);
+                safeThis->matchingCategories.set(baseRow, finalCategory);
             }
             const int row = safeThis->filteredAudioFiles.indexOf(file);
             if (row >= 0)
             {
-                safeThis->filteredBPMs.set(row, result.bpm);
+                safeThis->filteredBPMs.set(row, finalBpm);
                 safeThis->filteredKeys.set(row, result.key);
-                safeThis->filteredCategories.set(row, result.category);
+                safeThis->filteredCategories.set(row, finalCategory);
                 safeThis->fileList.repaintRow(row);
 
                 if (safeThis->fileList.getSelectedRow() == row)
                 {
-                    const juce::String label = result.category == "LOOP"
-                        ? result.category + " | BPM: " + result.bpm + " | Key: " + result.key
-                        : result.category + " | Key: " + result.key;
+                    const juce::String label = finalCategory == "LOOP"
+                        ? finalCategory + " | BPM: " + finalBpm + " | Key: " + result.key
+                        : finalCategory + " | Key: " + result.key;
                     safeThis->bpmDisplayLabel.setText(label, juce::dontSendNotification);
                 }
             }
@@ -1306,14 +1363,17 @@ void MainComponent::startBatchAnalysis(BatchScope scope)
                     const auto path = item.file.getFullPathName();
                     // Puede haberse analizado en la vista previa o editado manualmente.
                     if (safeThis->bpmLookup.contains(path)) continue;
-                    safeThis->bpmDatabase.set(path, item.analysis.bpm);
+                    const auto finalCategory = safeThis->manualCategoryLookup[path]
+                        ? safeThis->categoryLookup[path] : item.analysis.category;
+                    const auto finalBpm = finalCategory == "LOOP" ? item.analysis.bpm : juce::String("--");
+                    safeThis->bpmDatabase.set(path, finalBpm);
                     safeThis->keyDatabase.set(path, item.analysis.key);
-                    safeThis->categoryDatabase.set(path, item.analysis.category);
-                    safeThis->bpmLookup.set(path, item.analysis.bpm);
+                    safeThis->categoryDatabase.set(path, finalCategory);
+                    safeThis->bpmLookup.set(path, finalBpm);
                     safeThis->keyLookup.set(path, item.analysis.key);
-                    safeThis->categoryLookup.set(path, item.analysis.category);
+                    safeThis->categoryLookup.set(path, finalCategory);
                     if (safeThis->currentlyPreviewedFile == item.file)
-                        safeThis->transportControls.updateDetectedMetadata(item.analysis.bpm,
+                        safeThis->transportControls.updateDetectedMetadata(finalBpm,
                                                                           item.analysis.key);
                     changed = true;
                 }
@@ -1428,10 +1488,39 @@ void MainComponent::loadDatabase()
                 if (child->hasAttribute("bpm")) { bpmDatabase.set(path, bpm); bpmLookup.set(path, bpm); }
                 if (child->hasAttribute("key")) { keyDatabase.set(path, key); keyLookup.set(path, key); }
                 if (child->hasAttribute("category")) { categoryDatabase.set(path, cat); categoryLookup.set(path, cat); }
+                if (child->getStringAttribute("catManual") == "1")
+                {
+                    manualCategoryDatabase.set(path, "1");
+                    manualCategoryLookup.set(path, true);
+                }
                 favoritesDatabase.set(path, fav);
                 favoritesLookup.set(path, fav == "1");
             }
         }
+
+        // Older caches did not record whether a category was set by hand.
+        // Normalize only filenames with unambiguous category tags, once.
+        bool corrected = false;
+        for (const auto& path : categoryDatabase.getAllKeys())
+        {
+            if (manualCategoryLookup[path]) continue;
+            const auto named = getCategoryFromFilename(juce::File(path).getFileName());
+            if (named.isEmpty()) continue;
+
+            if (categoryDatabase[path] != named)
+            {
+                categoryDatabase.set(path, named);
+                categoryLookup.set(path, named);
+                corrected = true;
+            }
+            if (named != "LOOP" && bpmLookup.contains(path) && bpmLookup[path] != "--")
+            {
+                bpmDatabase.set(path, "--");
+                bpmLookup.set(path, "--");
+                corrected = true;
+            }
+        }
+        if (corrected) saveDatabase();
     }
 }
 
@@ -1453,10 +1542,11 @@ void MainComponent::flushDatabaseSave()
     const auto bpms = bpmDatabase;
     const auto keys = keyDatabase;
     const auto categories = categoryDatabase;
+    const auto manualCategories = manualCategoryDatabase;
     const auto favorites = favoritesDatabase;
 
     databaseWritePool.addJob(new BackgroundTask("Save sample cache",
-        [folder, target, rules, bpms, keys, categories, favorites](BackgroundTask&)
+        [folder, target, rules, bpms, keys, categories, manualCategories, favorites](BackgroundTask&)
     {
         juce::XmlElement xml("BPM_CACHE");
         xml.setAttribute("lastFolder", folder);
@@ -1489,6 +1579,7 @@ void MainComponent::flushDatabaseSave()
         writeAttribute(bpms, "bpm");
         writeAttribute(keys, "key");
         writeAttribute(categories, "category");
+        writeAttribute(manualCategories, "catManual");
         writeAttribute(favorites, "fav");
 
         // JUCE File::replaceWithText crea su propio archivo temporal y evita
