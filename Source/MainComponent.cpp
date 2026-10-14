@@ -210,6 +210,7 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
         if (!learnedTypeFound)
         {
             isExplicitLoop = fileNameLower.contains("loop") || fileNameLower.contains("bpm") ||
+                (fileNameLower.contains("_ll_") && hasNameBPM) ||
                 parentFolder.contains("loop") || parentFolder.contains("melody");
 
             isExplicitOneShot = fileNameLower.contains("oneshot") || fileNameLower.contains("one shot") ||
@@ -232,6 +233,12 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
         if (learnedTypeFound)
         {
             // audioType ya se definió por la base de datos de aprendizaje
+        }
+        else if (isExplicitLoop
+                 && (fileNameLower.contains("loop") || fileNameLower.contains("_ll_")))
+        {
+            // "Perc_Loop" and "Drum_Loop_No_Kick" are still loops.
+            audioType = "LOOP";
         }
         else if (isExplicitOneShot)
         {
@@ -1072,6 +1079,7 @@ void MainComponent::applyFilters()
             if (currentCat == "--")
             {
                 bool isLoopHint = fileName.contains("loop") || fileName.contains("bpm") ||
+                    (fileName.contains("_ll_") && extractBPMFromName(fileName) != "--") ||
                     parentFolder.contains("loop") || parentFolder.contains("melody");
 
                 bool isOneShotHint = fileName.contains("oneshot") || fileName.contains("kick") ||
@@ -1101,7 +1109,7 @@ void MainComponent::applyFilters()
         }
         else
         {
-            matchingBPMs.add(extractBPMFromName(fileName));
+            matchingBPMs.add(currentCat == "LOOP" ? extractBPMFromName(fileName) : "--");
             matchingKeys.add(extractKeyFromName(fileName));
         }
     }
