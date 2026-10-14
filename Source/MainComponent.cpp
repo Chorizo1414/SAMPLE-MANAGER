@@ -810,7 +810,9 @@ void MainComponent::listBoxItemClicked(int row, const juce::MouseEvent& e)
                     const auto nameLower = selectedAudioFile.getFileName().toLowerCase();
 
                     const auto explicitCategory = getCategoryFromFilename(selectedAudioFile.getFileName());
-                    manualCategoryDatabase.remove(filePath);
+                    // StringPairArray::remove tiene sobrecargas ambiguas en algunas
+                    // versiones de JUCE. Persistimos "0" para indicar modo automatico.
+                    manualCategoryDatabase.set(filePath, "0");
                     manualCategoryLookup.set(filePath, false);
                     if (explicitCategory.isNotEmpty())
                     {
