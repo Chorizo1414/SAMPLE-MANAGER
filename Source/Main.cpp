@@ -6,7 +6,7 @@ class SAMPLEMANAGERApplication  : public juce::JUCEApplication
 public:
     SAMPLEMANAGERApplication() {}
 
-    const juce::String getApplicationName() override       { return ProjectInfo::projectName; }
+    const juce::String getApplicationName() override       { return "JoHu Crate Free - by JoHu Studios"; }
     const juce::String getApplicationVersion() override    { return ProjectInfo::versionString; }
     bool moreThanOneInstanceAllowed() override             { return true; }
 
