@@ -48,7 +48,9 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
         return result;
         double durationInSeconds = (double)reader->lengthInSamples / (double)reader->sampleRate;
 
-        BTrack bpmDetector;
+        // SoundTouch BPMDetect es LGPLv2.1 y ya pertenece a las dependencias del proyecto.
+        // Separamos la deteccion de BPM del codigo GPLv3 de BTrack.
+        soundtouch::BPMDetect bpmDetector(1, static_cast<int>(reader->sampleRate));
         KeyDetector keyDetector(reader->sampleRate);
 
         int maxSeconds = 60;
@@ -57,6 +59,28 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
         int hopSize = 512;
         juce::AudioBuffer<float> buffer(reader->numChannels, hopSize);
         juce::HeapBlock<double> monoFrame(hopSize);
+        juce::HeapBlock<soundtouch::SAMPLETYPE> bpmFrame(hopSize);
+
+        // Los metadatos explicitos en el nombre tienen prioridad sobre la estimacion.
+        static const std::regex bpmTagPattern("([0-9]{2,3})\\s*bp");
+        static const std::regex keyTagPattern("([a-g][#b]?)\\s*(min|maj|minor|major|m\\b)");
+        const std::string lowerName = file.getFileName().toLowerCase().toStdString();
+        std::smatch bpmMatch, keyMatch;
+
+        juce::String inferredBPM = nameBPM;
+        if (inferredBPM.isEmpty() || inferredBPM == "--")
+            inferredBPM = std::regex_search(lowerName, bpmMatch, bpmTagPattern)
+                            ? juce::String(bpmMatch[1].str()) : "--";
+        const bool hasNameBPM = inferredBPM != "--";
+
+        juce::String inferredKey = "--";
+        if (std::regex_search(lowerName, keyMatch, keyTagPattern))
+        {
+            juce::String note = juce::String(keyMatch[1].str()).toUpperCase();
+            juce::String scale = juce::String(keyMatch[2].str());
+            inferredKey = note + (scale.startsWith("min") || scale == "m" ? " Min" : " Maj");
+        }
+
         juce::int64 samplesRead = 0;
 
         int peakCount = 0;
@@ -91,6 +115,7 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
                         sum += buffer.getReadPointer(ch)[i];
 
                     monoFrame[i] = (double)(sum / reader->numChannels);
+                    bpmFrame[i] = static_cast<soundtouch::SAMPLETYPE>(monoFrame[i]);
 
                     double absSample = std::abs(monoFrame[i]);
                     runningAverage = 0.999 * runningAverage + 0.001 * absSample;
@@ -106,15 +131,19 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
                 else { monoFrame[i] = 0.0; }
             }
 
-            bpmDetector.processAudioFrame(monoFrame.getData());
+            // No analizamos BPM cuando el nombre ya especifica un valor.
+            if (!hasNameBPM)
+                bpmDetector.inputSamples(bpmFrame.getData(), samplesToGet);
             keyDetector.processAudioFrame(monoFrame.getData(), samplesToGet);
             // Cedemos CPU a la reproducción y a la UI durante análisis largos.
             if ((samplesRead / hopSize) % 16 == 0) juce::Thread::sleep(3);
             samplesRead += samplesToGet;
         }
 
-        double detectedBPM = bpmDetector.getCurrentTempoEstimate();
-        juce::String detectedKey = keyDetector.getDetectedKey();
+        double detectedBPM = hasNameBPM ? inferredBPM.getDoubleValue()
+                                         : static_cast<double>(bpmDetector.getBpm());
+        if (!std::isfinite(detectedBPM) || detectedBPM <= 0.0) detectedBPM = 0.0;
+        juce::String detectedKey = inferredKey != "--" ? inferredKey : keyDetector.getDetectedKey();
 
         juce::String fileNameLower = file.getFileName().toLowerCase();
         juce::String audioType;
@@ -192,19 +221,9 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
             }
         }
 
-        // El trabajador de lote calcula el BPM del nombre sin acceder a MainComponent.
-        juce::String inferredBPM = nameBPM;
-        if (inferredBPM.isEmpty())
-        {
-            static const std::regex bpmPattern("([0-9]{2,3})\\s*bp");
-            std::smatch match;
-            const std::string lowercaseName = file.getFileName().toLowerCase().toStdString();
-            inferredBPM = std::regex_search(lowercaseName, match, bpmPattern)
-                              ? juce::String(match[1].str()) : "--";
-        }
-        if (inferredBPM != "--" && audioType == "LOOP")
+        // La prioridad del nombre ya se aplico antes del analisis.
+        if (hasNameBPM && audioType == "LOOP")
             detectedBPM = inferredBPM.getDoubleValue();
-
 
     result.valid = true;
     result.bpm = audioType == "LOOP" ? juce::String((int)std::round(detectedBPM)) : "--";
