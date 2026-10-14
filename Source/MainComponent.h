@@ -8,7 +8,6 @@
 #include "TransportControls.h"
 #include "AudioPlayer.h"
 #include "SoundTouch/BPMDetect.h"
-#include "BTrack/BTrack.h"
 #include "KeyDetector.h"
 #include "CustomTheme.h"
 

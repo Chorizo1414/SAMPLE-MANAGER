@@ -2,7 +2,7 @@
 
 <Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <Filter Include="SAMPLE MANAGER\Source\BTrack">
+    <Filter Include="SAMPLE MANAGER\Source\KissFFT">
       <UniqueIdentifier>{B9BE0ADB-3C57-7757-93F0-DC690EB59287}</UniqueIdentifier>
     </Filter>
     <Filter Include="SAMPLE MANAGER\Source\SoundTouch">
@@ -679,14 +679,8 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\Source\BTrack\BTrack.cpp">
-      <Filter>SAMPLE MANAGER\Source\BTrack</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\BTrack\kiss_fft.c">
-      <Filter>SAMPLE MANAGER\Source\BTrack</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\BTrack\OnsetDetectionFunction.cpp">
-      <Filter>SAMPLE MANAGER\Source\BTrack</Filter>
+    <ClCompile Include="..\..\Source\KissFFT\kiss_fft.c">
+      <Filter>SAMPLE MANAGER\Source\KissFFT</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\SoundTouchAudioSource.cpp">
       <Filter>SAMPLE MANAGER\Source</Filter>
@@ -3672,23 +3666,11 @@
     <ClInclude Include="..\..\Source\KeyDetector.h">
       <Filter>SAMPLE MANAGER\Source</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Source\BTrack\_kiss_fft_guts.h">
-      <Filter>SAMPLE MANAGER\Source\BTrack</Filter>
+    <ClInclude Include="..\..\Source\KissFFT\_kiss_fft_guts.h">
+      <Filter>SAMPLE MANAGER\Source\KissFFT</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Source\BTrack\BTrack.h">
-      <Filter>SAMPLE MANAGER\Source\BTrack</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\BTrack\CircularBuffer.h">
-      <Filter>SAMPLE MANAGER\Source\BTrack</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\BTrack\kiss_fft.h">
-      <Filter>SAMPLE MANAGER\Source\BTrack</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\BTrack\kissfft.hh">
-      <Filter>SAMPLE MANAGER\Source\BTrack</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\BTrack\OnsetDetectionFunction.h">
-      <Filter>SAMPLE MANAGER\Source\BTrack</Filter>
+    <ClInclude Include="..\..\Source\KissFFT\kiss_fft.h">
+      <Filter>SAMPLE MANAGER\Source\KissFFT</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\SoundTouchAudioSource.h">
       <Filter>SAMPLE MANAGER\Source</Filter>

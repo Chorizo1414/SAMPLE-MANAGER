@@ -6,20 +6,17 @@
     <GROUP id="{2CF1F25B-C0DE-A5C3-89DB-D70D5EBC66FA}" name="Source">
       <FILE id="ck3sHt" name="CustomTheme.h" compile="0" resource="0" file="Source/CustomTheme.h"/>
       <FILE id="qrwLJD" name="KeyDetector.h" compile="0" resource="0" file="Source/KeyDetector.h"/>
-      <GROUP id="{23295F90-B3A7-5BB6-52AC-072CD835C63C}" name="BTrack">
+      <GROUP id="{23295F90-B3A7-5BB6-52AC-072CD835C63C}" name="KissFFT">
         <FILE id="s1reue" name="_kiss_fft_guts.h" compile="0" resource="0"
-              file="Source/BTrack/_kiss_fft_guts.h"/>
-        <FILE id="JxDtQh" name="BTrack.cpp" compile="1" resource="0" file="Source/BTrack/BTrack.cpp"/>
-        <FILE id="TBHe8o" name="BTrack.h" compile="0" resource="0" file="Source/BTrack/BTrack.h"/>
-        <FILE id="aJ2VM9" name="CircularBuffer.h" compile="0" resource="0"
-              file="Source/BTrack/CircularBuffer.h"/>
-        <FILE id="XuTaGy" name="kiss_fft.c" compile="1" resource="0" file="Source/BTrack/kiss_fft.c"/>
-        <FILE id="x5U3cB" name="kiss_fft.h" compile="0" resource="0" file="Source/BTrack/kiss_fft.h"/>
-        <FILE id="CjT3JR" name="kissfft.hh" compile="0" resource="0" file="Source/BTrack/kissfft.hh"/>
-        <FILE id="VtqBpa" name="OnsetDetectionFunction.cpp" compile="1" resource="0"
-              file="Source/BTrack/OnsetDetectionFunction.cpp"/>
-        <FILE id="jDw7Gd" name="OnsetDetectionFunction.h" compile="0" resource="0"
-              file="Source/BTrack/OnsetDetectionFunction.h"/>
+              file="Source/KissFFT/_kiss_fft_guts.h"/>
+        
+        
+        
+        <FILE id="XuTaGy" name="kiss_fft.c" compile="1" resource="0" file="Source/KissFFT/kiss_fft.c"/>
+        <FILE id="x5U3cB" name="kiss_fft.h" compile="0" resource="0" file="Source/KissFFT/kiss_fft.h"/>
+        
+        
+        
       </GROUP>
       <FILE id="RIsQW3" name="SoundTouchAudioSource.cpp" compile="1" resource="0"
             file="Source/SoundTouchAudioSource.cpp"/>
