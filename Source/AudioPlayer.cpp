@@ -191,6 +191,7 @@ void AudioPlayer::loadFile(const juce::File& audioFile)
         newSource->setLooping(isLooping);
 
         transportSource.setSource(newSource.get(), 0, nullptr, reader->sampleRate);
+        stretchSource.resetForNewFile();
         readerSource.reset(newSource.release());
 
         updateProcessing();
@@ -256,7 +257,7 @@ void AudioPlayer::setTempo(double multiplier)
 void AudioPlayer::setStretch(bool enabled)
 {
     isStretchEnabled = enabled;
-    soundTouchSource.setStretchEnabled(enabled);
+    stretchSource.setStretchEnabled(enabled);
     updateProcessing();
 }
 
@@ -264,14 +265,14 @@ void AudioPlayer::updateProcessing()
 {
     if (isStretchEnabled)
     {
-        soundTouchSource.setPitchSemiTones(currentPitchSemitones);
-        soundTouchSource.setTempoMultiplier(currentTempoMultiplier);
+        stretchSource.setPitchSemiTones(currentPitchSemitones);
+        stretchSource.setTempoMultiplier(currentTempoMultiplier);
         resamplerSource.setResamplingRatio(1.0);
     }
     else
     {
-        soundTouchSource.setPitchSemiTones(0.0);
-        soundTouchSource.setTempoMultiplier(1.0);
+        stretchSource.setPitchSemiTones(0.0);
+        stretchSource.setTempoMultiplier(1.0);
         double pitchRatio = std::pow(2.0, currentPitchSemitones / 12.0);
         resamplerSource.setResamplingRatio(pitchRatio * currentTempoMultiplier);
     }
