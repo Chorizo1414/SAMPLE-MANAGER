@@ -1,0 +1,16 @@
+name: JoHu Crate DSP smoke
+on:
+  push:
+    branches:
+      - 'fix2/johu-crate-free'
+  workflow_dispatch:
+
+jobs:
+  dsp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile MIT stretch and custom BPM smoke test
+        run: g++ -std=c++17 -O2 -Wall -Wextra -I Source tests/dsp_smoke.cpp -o dsp_smoke
+      - name: Run DSP tests
+        run: ./dsp_smoke
