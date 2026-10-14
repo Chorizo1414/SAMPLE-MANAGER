@@ -2,11 +2,11 @@
 
 <Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <Filter Include="SAMPLE MANAGER\Source\Signalsmith">
+      <UniqueIdentifier>{C319429B-9E00-46DC-91EC-D4D717764579}</UniqueIdentifier>
+    </Filter>
     <Filter Include="SAMPLE MANAGER\Source\KissFFT">
       <UniqueIdentifier>{B9BE0ADB-3C57-7757-93F0-DC690EB59287}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="SAMPLE MANAGER\Source\SoundTouch">
-      <UniqueIdentifier>{7FD7906A-5B29-0B70-CC81-0905ABFDF1C8}</UniqueIdentifier>
     </Filter>
     <Filter Include="SAMPLE MANAGER\Source">
       <UniqueIdentifier>{0EF4148C-258B-0287-A220-BD5824D461F0}</UniqueIdentifier>
@@ -679,53 +679,11 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\Source\KissFFT\kiss_fft.c">
-      <Filter>SAMPLE MANAGER\Source\KissFFT</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\SoundTouchAudioSource.cpp">
+    <ClCompile Include="..\..\Source\StretchAudioSource.cpp">
       <Filter>SAMPLE MANAGER\Source</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\Source\SoundTouch\AAFilter.cpp">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\SoundTouch\BPMDetect.cpp">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\SoundTouch\cpu_detect_x86.cpp">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\SoundTouch\FIFOSampleBuffer.cpp">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\SoundTouch\FIRFilter.cpp">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\SoundTouch\InterpolateCubic.cpp">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\SoundTouch\InterpolateLinear.cpp">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\SoundTouch\InterpolateShannon.cpp">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\SoundTouch\mmx_optimized.cpp">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\SoundTouch\PeakFinder.cpp">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\SoundTouch\RateTransposer.cpp">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\SoundTouch\SoundTouch.cpp">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\SoundTouch\sse_optimized.cpp">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\Source\SoundTouch\TDStretch.cpp">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
+    <ClCompile Include="..\..\Source\KissFFT\kiss_fft.c">
+      <Filter>SAMPLE MANAGER\Source\KissFFT</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\AudioPlayer.cpp">
       <Filter>SAMPLE MANAGER\Source</Filter>
@@ -3669,56 +3627,23 @@
     <ClInclude Include="..\..\Source\KissFFT\_kiss_fft_guts.h">
       <Filter>SAMPLE MANAGER\Source\KissFFT</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Source\KissFFT\kiss_fft.h">
-      <Filter>SAMPLE MANAGER\Source\KissFFT</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\SoundTouchAudioSource.h">
+    <ClInclude Include="..\..\Source\StretchAudioSource.h">
       <Filter>SAMPLE MANAGER\Source</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Source\SoundTouch\AAFilter.h">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
+    <ClInclude Include="..\..\Source\TempoDetector.h">
+      <Filter>SAMPLE MANAGER\Source</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Source\SoundTouch\BPMDetect.h">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
+    <ClInclude Include="..\..\Source\Signalsmith\signalsmith-stretch.h">
+      <Filter>SAMPLE MANAGER\Source\Signalsmith</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Source\SoundTouch\cpu_detect.h">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
+    <ClInclude Include="..\..\Source\Signalsmith\signalsmith-linear\fft.h">
+      <Filter>SAMPLE MANAGER\Source\Signalsmith</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Source\SoundTouch\FIFOSampleBuffer.h">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
+    <ClInclude Include="..\..\Source\Signalsmith\signalsmith-linear\stft.h">
+      <Filter>SAMPLE MANAGER\Source\Signalsmith</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Source\SoundTouch\FIFOSamplePipe.h">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\SoundTouch\FIRFilter.h">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\SoundTouch\InterpolateCubic.h">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\SoundTouch\InterpolateLinear.h">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\SoundTouch\InterpolateShannon.h">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\SoundTouch\PeakFinder.h">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\SoundTouch\RateTransposer.h">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\SoundTouch\SoundTouch.h">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\SoundTouch\soundtouch_config.h">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\SoundTouch\STTypes.h">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Source\SoundTouch\TDStretch.h">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
+    <ClInclude Include="..\..\Source\KissFFT\kiss_fft.h">
+      <Filter>SAMPLE MANAGER\Source\KissFFT</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\AudioPlayer.h">
       <Filter>SAMPLE MANAGER\Source</Filter>
@@ -7745,18 +7670,6 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\..\Source\SoundTouch\Makefile.am">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </None>
-    <None Include="..\..\Source\SoundTouch\SoundTouch.sln">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </None>
-    <None Include="..\..\Source\SoundTouch\SoundTouch.vcxproj">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </None>
-    <None Include="..\..\Source\SoundTouch\soundtouch_config.h.in">
-      <Filter>SAMPLE MANAGER\Source\SoundTouch</Filter>
-    </None>
     <None Include="..\..\..\..\..\APPS\JUCE\modules\juce_audio_devices\native\asio\LICENSE.txt">
       <Filter>JUCE Modules\juce_audio_devices\native\asio</Filter>
     </None>
