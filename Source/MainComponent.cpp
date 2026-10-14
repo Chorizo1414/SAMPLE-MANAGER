@@ -50,9 +50,6 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
 
         // SoundTouch BPMDetect es LGPLv2.1 y ya pertenece a las dependencias del proyecto.
         // Separamos la deteccion de BPM del codigo GPLv3 de BTrack.
-        soundtouch::BPMDetect bpmDetector(1, static_cast<int>(reader->sampleRate));
-        KeyDetector keyDetector(reader->sampleRate);
-
         int maxSeconds = 60;
         juce::int64 numSamplesToRead = juce::jmin(reader->lengthInSamples, (juce::int64)(reader->sampleRate * maxSeconds));
 
@@ -80,6 +77,15 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
             juce::String scale = juce::String(keyMatch[2].str());
             inferredKey = note + (scale.startsWith("min") || scale == "m" ? " Min" : " Maj");
         }
+
+        // Evitamos instanciar analizadores pesados para campos ya etiquetados.
+        std::unique_ptr<soundtouch::BPMDetect> bpmDetector;
+        if (!hasNameBPM)
+            bpmDetector = std::make_unique<soundtouch::BPMDetect>(1, static_cast<int>(reader->sampleRate));
+
+        std::unique_ptr<KeyDetector> keyDetector;
+        if (inferredKey == "--")
+            keyDetector = std::make_unique<KeyDetector>(reader->sampleRate);
 
         juce::int64 samplesRead = 0;
 
@@ -132,18 +138,19 @@ AudioAnalysisResult analyzeAudioInBackground(BackgroundTask& job, const juce::Fi
             }
 
             // No analizamos BPM cuando el nombre ya especifica un valor.
-            if (!hasNameBPM)
-                bpmDetector.inputSamples(bpmFrame.getData(), samplesToGet);
-            keyDetector.processAudioFrame(monoFrame.getData(), samplesToGet);
+            if (bpmDetector != nullptr)
+                bpmDetector->inputSamples(bpmFrame.getData(), samplesToGet);
+            if (keyDetector != nullptr)
+                keyDetector->processAudioFrame(monoFrame.getData(), samplesToGet);
             // Cedemos CPU a la reproducción y a la UI durante análisis largos.
             if ((samplesRead / hopSize) % 16 == 0) juce::Thread::sleep(3);
             samplesRead += samplesToGet;
         }
 
         double detectedBPM = hasNameBPM ? inferredBPM.getDoubleValue()
-                                         : static_cast<double>(bpmDetector.getBpm());
+                                         : static_cast<double>(bpmDetector->getBpm());
         if (!std::isfinite(detectedBPM) || detectedBPM <= 0.0) detectedBPM = 0.0;
-        juce::String detectedKey = inferredKey != "--" ? inferredKey : keyDetector.getDetectedKey();
+        juce::String detectedKey = keyDetector != nullptr ? keyDetector->getDetectedKey() : inferredKey;
 
         juce::String fileNameLower = file.getFileName().toLowerCase();
         juce::String audioType;
