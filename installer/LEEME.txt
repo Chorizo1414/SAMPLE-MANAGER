@@ -1,0 +1,36 @@
+JOHU CRATE FREE - by JoHu Studios
+Version de prueba: 0.9 Beta
+Windows 64 bits - aplicacion independiente (standalone)
+
+INICIO RAPIDO
+1. Abre JoHu Crate Free desde el escritorio o el menu Inicio.
+2. Pulsa "Agrega tu carpeta de samples" y elige la carpeta principal.
+3. Busca, escucha, filtra por tipo, BPM y tonalidad, y marca favoritos.
+4. En Configuracion y analisis puedes analizar raiz, carpeta o busqueda.
+5. Puedes escuchar cambios de pitch y BPM mientras produces.
+6. Al arrastrar al DAW, la edicion FREE entrega el archivo ORIGINAL,
+   aunque escuches cambios de pitch y tempo durante la vista previa.
+
+JoHu Crate funciona por separado de tu DAW: NO es un VST ni requiere
+copiar archivos a carpetas de plugins.
+
+DESINSTALAR
+Windows > Aplicaciones instaladas > JoHu Crate Free > Desinstalar.
+El desinstalador no borra favoritos ni metadatos guardados en AppData.
+
+LICENCIAS
+En la carpeta "Licencias" puedes consultar:
+- Signalsmith Stretch: MIT
+- Signalsmith Linear: MIT
+- Kiss FFT: BSD-3-Clause
+Las dependencias tienen sus propios titulares de derechos de autor.
+
+NOTAS
+- La estimacion automatica de BPM y tonalidad puede ser inexacta.
+- Si Windows indica que falta el runtime Visual C++, instala la
+  version x64 oficial desde Microsoft:
+  https://learn.microsoft.com/es-es/cpp/windows/latest-supported-vc-redist
+- Si usas una interfaz ASIO ocupada en otro programa, es posible que
+  debas cambiar el dispositivo de audio en Configuracion.
+
+JoHu Studios. JoHu Crate Free es un proyecto en evolucion.
