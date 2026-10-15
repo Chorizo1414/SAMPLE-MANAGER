@@ -29,7 +29,8 @@
 
 - [ ] Decidir identidad visual final: JoHu Crate Free — by JoHu Studios. Cambiar el nombre de binario y de proyecto **solo cuando haya plan de migración de caché** y compilación probada.
 - [ ] Crear icono original (no reutilizar logos de JUCE) y capturas de pantalla.
-- [ ] Crear ZIP portable o instalador para Windows x64 desde la carpeta de salida Release, con ejecutable, licencias, avisos y manual.
+- [x] Preparar los scripts NSIS y el generador de ZIP portable con contenido mínimo y avisos MIT/BSD (solo la preparación del código, todavía sin verificar el instalador ejecutado).
+- [ ] Compilar y probar el instalador real en Windows x64. Confirmar nombre JoHu Crate Free, accesos directos, desinstalación y preservación de favoritos.
 - [ ] Probar ZIP/instalador en un Windows limpio; comprobar desinstalación y persistencia segura de datos de usuario.
 - [ ] Añadir número de versión visible y notas de versión.
 - [ ] Preparar página pública de descarga, instrucciones, informe de errores, donaciones opcionales y política de privacidad si se recopilan datos.
