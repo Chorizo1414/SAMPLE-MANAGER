@@ -1,0 +1,25 @@
+JOHU CRATE FREE — by JoHu Studios
+Versión candidata: 0.9 Beta (Windows x64, standalone)
+
+PRIMER USO
+1. Abre "JoHu Crate Free" desde el escritorio o el menú Inicio.
+2. Haz clic en "Agrega tu carpeta de samples" y selecciona tu biblioteca.
+3. Utiliza la búsqueda, los filtros y las estrellas para encontrar tus sonidos.
+4. Escucha tus samples, y ajusta BPM y tonalidad para previsualizar ideas.
+5. Desde "Configuración y análisis" puedes analizar toda la raíz, una carpeta o la búsqueda, en segundo plano.
+
+IMPORTANTE PARA USUARIOS DE DAW
+La edición Free permite ESCUCHAR cambios de BPM y tonalidad, pero al arrastrar el sample al DAW entrega el ARCHIVO ORIGINAL. No instala un plugin VST/AU ni modifica tus samples en disco.
+
+DATOS Y DESINSTALACIÓN
+La desinstalación retira el programa y sus accesos directos.
+No elimina tus bibliotecas de samples ni las preferencias y favoritos del usuario.
+
+LICENCIAS
+Los avisos y licencias de terceros están en la carpeta "Licencias" y en "AVISOS-DE-TERCEROS.txt".
+
+ESTADO
+Versión de pruebas para preparar la beta. Deben completarse pruebas en otros equipos y la revisión de distribución antes de la descarga pública.
+
+SOPORTE
+https://github.com/Chorizo1414/SAMPLE-MANAGER/issues
